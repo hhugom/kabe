@@ -1,0 +1,27 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 0,
+      "version": "6",
+      "when": 1782820141958,
+      "tag": "0000_ambiguous_iron_monger",
+      "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1782822230934,
+      "tag": "0001_next_reavers",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1783434155964,
+      "tag": "0002_bored_captain_universe",
+      "breakpoints": true
+    }
+  ]
+}

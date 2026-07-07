@@ -1,0 +1,3 @@
+# v1 architecture: Expo + SQLite + Drizzle, no network
+
+v1 is a native iOS + Android app built with Expo (React Native, TypeScript) using `expo-sqlite` with the Drizzle ORM for on-device storage. No backend, no authentication, no network — data lives only on the user's device. The schema is sync-ready (UUID primary keys, `created_at` / `updated_at` on every row, soft-delete via `deleted_at`) so that a future sync layer doesn't require painful migration. Chosen over a PWA (better install + offline guarantees), over Flutter (TypeScript ergonomics), and over native dual codebases (single-developer scope). v1 dogfoods on Android (developer's daily driver); iOS builds from the same codebase but isn't QA'd to the same bar until later.
