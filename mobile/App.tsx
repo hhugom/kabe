@@ -8,13 +8,14 @@ import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { StatusBar } from 'expo-status-bar';
+import { TamaguiProvider } from 'tamagui';
 
+import tamaguiConfig from './tamagui.config';
 import { colors, spacing, typography } from './src/theme';
 
 import { getAppDb } from './src/db/client';
 import migrations from './src/db/migrations';
 import type { RootStackParamList } from './src/navigation/types';
-import { AestheticPrototype } from './src/screens/AestheticPrototype';
 import { DrillsScreen } from './src/screens/DrillsScreen';
 import { HomeScreen } from './src/screens/HomeScreen';
 import { InSessionScreen } from './src/screens/InSessionScreen';
@@ -90,6 +91,7 @@ export default function App() {
   }
 
   return (
+    <TamaguiProvider config={tamaguiConfig} defaultTheme="kabe_dark">
     <SafeAreaProvider>
       <NavigationContainer>
         <RootStack.Navigator
@@ -118,17 +120,11 @@ export default function App() {
             component={InSessionScreen}
             options={{ title: 'Session' }}
           />
-          {__DEV__ ? (
-            <RootStack.Screen
-              name="AestheticPrototype"
-              component={AestheticPrototype}
-              options={{ headerShown: false }}
-            />
-          ) : null}
         </RootStack.Navigator>
         <StatusBar style="auto" />
       </NavigationContainer>
     </SafeAreaProvider>
+    </TamaguiProvider>
   );
 }
 

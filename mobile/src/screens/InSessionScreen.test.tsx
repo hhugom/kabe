@@ -1,5 +1,7 @@
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { AppState } from 'react-native';
+import { TamaguiProvider } from 'tamagui';
+import tamaguiConfig from '../../tamagui.config';
 import type { Drill } from '../use-cases/drills';
 import { listDrills } from '../use-cases/drills';
 import { getRoutine } from '../use-cases/routines';
@@ -90,7 +92,11 @@ async function renderScreen(opts: { clock?: () => Date } = {}) {
   const navigation = { goBack: jest.fn(), navigate: jest.fn() } as any;
   currentNavigation = navigation;
   const route = { key: 'k', name: 'InSession' } as any;
-  return render(<InSessionScreen navigation={navigation} route={route} clock={opts.clock} />);
+  return render(
+    <TamaguiProvider config={tamaguiConfig} defaultTheme="kabe_dark">
+      <InSessionScreen navigation={navigation} route={route} clock={opts.clock} />
+    </TamaguiProvider>
+  );
 }
 
 describe('InSessionScreen — timer, wake-lock, and navigation', () => {
@@ -175,10 +181,13 @@ describe('InSessionScreen — timer, wake-lock, and navigation', () => {
     });
     mockListDrills.mockResolvedValue([drill]);
 
-    const { findByTestId, findByText } = await renderScreen();
+    const { findByTestId, findByText, findAllByText } = await renderScreen();
     fireEvent.press(await findByTestId('pick-drill-dur-t'));
 
-    expect(await findByText(/target 10:00/i)).toBeTruthy();
+    // Zwift-HUD layout splits target label and value: a "TARGET" chip labels the 10:00 value.
+    expect(await findByText(/target/i)).toBeTruthy();
+    const tens = await findAllByText('10:00');
+    expect(tens.length).toBeGreaterThan(0);
   });
 
   it('duration timer with no target does not show a target label', async () => {

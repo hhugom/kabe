@@ -80,4 +80,4 @@ Notes:
 
 ## Visual mock
 
-`mobile/src/screens/AestheticPrototype.tsx` (variant C). Reachable in dev builds via the "dev · aesthetic prototype (#3)" link at the bottom of Home. Kept until #6 folds a chosen library into the real In-Session screen.
+Folded into the real In-Session screen at `mobile/src/screens/InSessionScreen.tsx` as part of #6 (Tamagui picked; palette tokens live in `mobile/src/theme.ts` and are mirrored into a `kabe_dark` Tamagui theme in `mobile/tamagui.config.ts`). The throwaway prototype (`AestheticPrototype.tsx` + variants A/B) has been removed; variants A and B live only in git history.

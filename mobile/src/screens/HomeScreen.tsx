@@ -74,18 +74,6 @@ export function HomeScreen() {
           />
         </View>
       )}
-
-      {__DEV__ ? (
-        <Pressable
-          onPress={() => navigation.navigate('AestheticPrototype')}
-          style={styles.devPrototypeLink}
-          hitSlop={8}
-        >
-          <Text style={styles.devPrototypeLinkText}>
-            dev · aesthetic prototype (#3)
-          </Text>
-        </Pressable>
-      ) : null}
     </Screen>
   );
 }
@@ -125,15 +113,5 @@ const styles = StyleSheet.create({
   resumeMeta: {
     ...typography.bodyMuted,
     marginTop: spacing.xs,
-  },
-  devPrototypeLink: {
-    marginTop: spacing.xxl,
-    alignSelf: 'flex-start',
-    paddingVertical: spacing.xs,
-  },
-  devPrototypeLinkText: {
-    ...typography.caption,
-    color: colors.textMuted,
-    textDecorationLine: 'underline',
   },
 });
