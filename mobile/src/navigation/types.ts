@@ -3,4 +3,5 @@ export type RootStackParamList = {
   InSession: undefined;
   PickRoutine: undefined;
   RoutineEditor: { routineId?: string };
+  AestheticPrototype: undefined;
 };
