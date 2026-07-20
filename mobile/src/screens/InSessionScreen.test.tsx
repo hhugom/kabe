@@ -2,10 +2,9 @@ import { act, fireEvent, render } from '@testing-library/react-native';
 import { AppState } from 'react-native';
 import type { Drill } from '../use-cases/drills';
 import { listDrills } from '../use-cases/drills';
-import type { Routine, RoutineItem } from '../use-cases/routines';
 import { getRoutine } from '../use-cases/routines';
 import type { DrillEntry, Session } from '../use-cases/sessions';
-import { getActiveSession, logEntry } from '../use-cases/sessions';
+import { endSession, getActiveSession, logEntry } from '../use-cases/sessions';
 import { InSessionScreen } from './InSessionScreen';
 
 jest.mock('../use-cases/drills', () => ({
@@ -39,8 +38,9 @@ const mockListDrills = listDrills as jest.MockedFunction<typeof listDrills>;
 const mockGetActiveSession = getActiveSession as jest.MockedFunction<typeof getActiveSession>;
 const mockLogEntry = logEntry as jest.MockedFunction<typeof logEntry>;
 const mockGetRoutine = getRoutine as jest.MockedFunction<typeof getRoutine>;
+const mockEndSession = endSession as jest.MockedFunction<typeof endSession>;
 
-const NOW = '2026-06-30T12:00:00.000Z';
+const NOW = '2026-07-09T12:00:00.000Z';
 
 function makeDrill(over: Partial<Drill>): Drill {
   return {
@@ -84,41 +84,22 @@ function makeEntry(over: Partial<DrillEntry> = {}): DrillEntry {
   };
 }
 
-function makeRoutineItem(over: Partial<RoutineItem>): RoutineItem {
-  return {
-    id: over.id ?? 'ri-id',
-    routineId: over.routineId ?? 'r-1',
-    drillId: over.drillId ?? 'd-a',
-    plannedSets: over.plannedSets ?? null,
-    position: over.position ?? 0,
-    createdAt: NOW,
-    updatedAt: NOW,
-    deletedAt: null,
-  };
-}
-
-function makeRoutine(over: Partial<Routine> = {}): Routine {
-  return {
-    id: over.id ?? 'r-1',
-    name: over.name ?? 'Wall warmup',
-    createdAt: NOW,
-    updatedAt: NOW,
-    deletedAt: null,
-  };
-}
+let currentNavigation: { goBack: jest.Mock; navigate: jest.Mock } | null = null;
 
 async function renderScreen(opts: { clock?: () => Date } = {}) {
   const navigation = { goBack: jest.fn(), navigate: jest.fn() } as any;
+  currentNavigation = navigation;
   const route = { key: 'k', name: 'InSession' } as any;
   return render(<InSessionScreen navigation={navigation} route={route} clock={opts.clock} />);
 }
 
-describe('InSessionScreen', () => {
+describe('InSessionScreen — timer, wake-lock, and navigation', () => {
   beforeEach(() => {
     mockListDrills.mockReset();
     mockGetActiveSession.mockReset();
     mockLogEntry.mockReset();
     mockGetRoutine.mockReset();
+    mockEndSession.mockReset();
     mockActivateKeepAwake.mockReset();
     mockActivateKeepAwake.mockResolvedValue(undefined);
     mockDeactivateKeepAwake.mockReset();
@@ -127,42 +108,18 @@ describe('InSessionScreen', () => {
     mockGetRoutine.mockResolvedValue(null);
   });
 
-  it('lists drills across all metrics, not only reps', async () => {
-    mockListDrills.mockResolvedValue([
-      makeDrill({ id: '1', name: 'Reps drill', metric: 'reps' }),
-      makeDrill({ id: '2', name: 'Duration drill', metric: 'duration' }),
-      makeDrill({ id: '3', name: 'Accuracy drill', metric: 'accuracy' }),
-    ]);
+  it('navigates back when no session is active', async () => {
+    mockGetActiveSession.mockResolvedValue(null);
+    mockListDrills.mockResolvedValue([]);
 
-    const { findByText } = await renderScreen();
+    await renderScreen();
 
-    expect(await findByText('Reps drill')).toBeTruthy();
-    expect(await findByText('Duration drill')).toBeTruthy();
-    expect(await findByText('Accuracy drill')).toBeTruthy();
+    await act(async () => {});
+
+    expect(currentNavigation!.goBack).toHaveBeenCalled();
   });
 
-  it('submits an accuracy entry with value and attempted', async () => {
-    const drill = makeDrill({ id: 'acc-1', name: 'Serve accuracy', metric: 'accuracy' });
-    mockListDrills.mockResolvedValue([drill]);
-
-    const { findByText, findByTestId, findByLabelText } = await renderScreen();
-    fireEvent.press(await findByTestId('pick-drill-acc-1'));
-
-    fireEvent.changeText(await findByLabelText('accuracy-value-input'), '16');
-    fireEvent.changeText(await findByLabelText('accuracy-attempted-input'), '20');
-    fireEvent.press(await findByText('Save'));
-
-    expect(mockLogEntry.mock.calls[0][1]).toEqual(
-      expect.objectContaining({
-        sessionId: 'session-1',
-        drillId: 'acc-1',
-        value: 16,
-        attempted: 20,
-      })
-    );
-  });
-
-  it('duration Start → Stop calls logEntry with elapsed seconds', async () => {
+  it('duration Start → Stop persists elapsed seconds via logEntry', async () => {
     const drill = makeDrill({ id: 'dur-1', name: 'Wall rally', metric: 'duration' });
     mockListDrills.mockResolvedValue([drill]);
 
@@ -206,7 +163,6 @@ describe('InSessionScreen', () => {
     expect(await findByText('3:07')).toBeTruthy();
 
     fireEvent.press(await findByText('Stop'));
-    // And the persisted value matches the same wall-clock diff.
     expect(mockLogEntry.mock.calls[0][1].value).toBe(187);
   });
 
@@ -223,6 +179,16 @@ describe('InSessionScreen', () => {
     fireEvent.press(await findByTestId('pick-drill-dur-t'));
 
     expect(await findByText(/target 10:00/i)).toBeTruthy();
+  });
+
+  it('duration timer with no target does not show a target label', async () => {
+    const drill = makeDrill({ id: 'dur-nt', name: 'Wall rally', metric: 'duration', target: null });
+    mockListDrills.mockResolvedValue([drill]);
+
+    const { findByTestId, queryByText } = await renderScreen();
+    fireEvent.press(await findByTestId('pick-drill-dur-nt'));
+
+    expect(queryByText(/target/i)).toBeNull();
   });
 
   it('activates keep-awake only while the timer is running', async () => {
@@ -279,134 +245,19 @@ describe('InSessionScreen', () => {
     }
   });
 
-  it('duration timer with no target does not show a target label', async () => {
-    const drill = makeDrill({ id: 'dur-nt', name: 'Wall rally', metric: 'duration', target: null });
-    mockListDrills.mockResolvedValue([drill]);
-
-    const { findByTestId, queryByText } = await renderScreen();
-    fireEvent.press(await findByTestId('pick-drill-dur-nt'));
-
-    expect(queryByText(/target/i)).toBeNull();
-  });
-
-  it('Skip removes a planned item from the planned list but leaves the drill ad-hoc pickable', async () => {
-    const drillA = makeDrill({ id: 'd-a', name: 'Wall rally', metric: 'reps' });
-    const drillB = makeDrill({ id: 'd-b', name: 'Backhand', metric: 'reps' });
-    mockListDrills.mockResolvedValue([drillA, drillB]);
-    mockGetActiveSession.mockResolvedValue({
-      session: makeSession({ routineId: 'r-1' }),
-      entries: [],
-    });
-    mockGetRoutine.mockResolvedValue({
-      routine: makeRoutine({ id: 'r-1' }),
-      items: [
-        makeRoutineItem({ id: 'ri-1', drillId: 'd-a', plannedSets: 3, position: 0 }),
-        makeRoutineItem({ id: 'ri-2', drillId: 'd-b', plannedSets: 1, position: 1 }),
-      ],
-    });
-
-    const { findByTestId, queryByTestId } = await renderScreen();
-
-    // Both planned items visible initially
-    expect(await findByTestId('planned-item-ri-1')).toBeTruthy();
-    expect(await findByTestId('planned-item-ri-2')).toBeTruthy();
-
-    // Skip the first planned item
-    await act(async () => {
-      fireEvent.press(await findByTestId('skip-ri-1'));
-    });
-
-    // First item removed from planned list, second still there
-    expect(queryByTestId('planned-item-ri-1')).toBeNull();
-    expect(queryByTestId('planned-item-ri-2')).toBeTruthy();
-
-    // Drill for the skipped planned item still available in the ad-hoc picker
-    expect(queryByTestId('pick-drill-d-a')).toBeTruthy();
-  });
-
-  it('renders "logged: N" for planned items whose plannedSets is null', async () => {
-    const drillA = makeDrill({ id: 'd-a', name: 'Wall rally', metric: 'reps' });
-    mockListDrills.mockResolvedValue([drillA]);
-    mockGetActiveSession.mockResolvedValue({
-      session: makeSession({ routineId: 'r-1' }),
-      entries: [makeEntry({ drillId: 'd-a', value: 5 })],
-    });
-    mockGetRoutine.mockResolvedValue({
-      routine: makeRoutine({ id: 'r-1' }),
-      items: [makeRoutineItem({ id: 'ri-1', drillId: 'd-a', plannedSets: null, position: 0 })],
-    });
+  it('End Session calls endSession and navigates back', async () => {
+    mockListDrills.mockResolvedValue([]);
 
     const { findByText } = await renderScreen();
 
-    expect(await findByText('logged: 1')).toBeTruthy();
-  });
+    fireEvent.press(await findByText('End Session'));
+    await act(async () => {});
 
-  it('tick-off badge updates as entries are logged against a planned drill', async () => {
-    const drillA = makeDrill({ id: 'd-a', name: 'Serve reps', metric: 'reps' });
-    mockListDrills.mockResolvedValue([drillA]);
-    mockGetRoutine.mockResolvedValue({
-      routine: makeRoutine({ id: 'r-1' }),
-      items: [makeRoutineItem({ id: 'ri-1', drillId: 'd-a', plannedSets: 3, position: 0 })],
-    });
-
-    mockGetActiveSession
-      .mockResolvedValueOnce({ session: makeSession({ routineId: 'r-1' }), entries: [] })
-      .mockResolvedValue({
-        session: makeSession({ routineId: 'r-1' }),
-        entries: [makeEntry({ drillId: 'd-a', value: 10 })],
-      });
-    mockLogEntry.mockResolvedValue(makeEntry({ drillId: 'd-a', value: 10 }));
-
-    const { findByText, findByTestId, findByLabelText } = await renderScreen();
-
-    expect(await findByText('0 / 3')).toBeTruthy();
-
-    fireEvent.press(await findByTestId('planned-item-ri-1'));
-    fireEvent.changeText(await findByLabelText('reps-input'), '10');
-    fireEvent.press(await findByText('Save'));
-
-    expect(await findByText('1 / 3')).toBeTruthy();
-  });
-
-  it('renders planned items with 0 / N badges when session has a routineId', async () => {
-    const drillA = makeDrill({ id: 'd-a', name: 'Wall rally', metric: 'duration' });
-    const drillB = makeDrill({ id: 'd-b', name: 'Serve', metric: 'accuracy' });
-    mockListDrills.mockResolvedValue([drillA, drillB]);
-    mockGetActiveSession.mockResolvedValue({
-      session: makeSession({ routineId: 'r-1' }),
-      entries: [],
-    });
-    mockGetRoutine.mockResolvedValue({
-      routine: makeRoutine({ id: 'r-1', name: 'Wall warmup' }),
-      items: [
-        makeRoutineItem({ id: 'ri-1', drillId: 'd-a', plannedSets: 3, position: 0 }),
-        makeRoutineItem({ id: 'ri-2', drillId: 'd-b', plannedSets: 1, position: 1 }),
-      ],
-    });
-
-    const { findByText, findByTestId } = await renderScreen();
-
-    const item1 = await findByTestId('planned-item-ri-1');
-    const item2 = await findByTestId('planned-item-ri-2');
-    expect(item1).toBeTruthy();
-    expect(item2).toBeTruthy();
-    expect(await findByText('0 / 3')).toBeTruthy();
-    expect(await findByText('0 / 1')).toBeTruthy();
-  });
-
-  it("defaults the accuracy 'attempted' field to the drill target", async () => {
-    const drill = makeDrill({
-      id: 'acc-t',
-      name: 'Serve accuracy',
-      metric: 'accuracy',
-      target: 25,
-    });
-    mockListDrills.mockResolvedValue([drill]);
-
-    const { findByTestId, findByLabelText } = await renderScreen();
-    fireEvent.press(await findByTestId('pick-drill-acc-t'));
-
-    const attemptedInput = await findByLabelText('accuracy-attempted-input');
-    expect(attemptedInput.props.value).toBe('25');
+    expect(mockEndSession).toHaveBeenCalledWith(
+      null,
+      'session-1',
+      expect.anything()
+    );
+    expect(currentNavigation!.goBack).toHaveBeenCalled();
   });
 });

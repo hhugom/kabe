@@ -15,15 +15,22 @@ import { Screen } from '../components/Screen';
 import { getAppDb } from '../db/client';
 import type { RootStackParamList } from '../navigation/types';
 import { colors, radius, spacing, typography } from '../theme';
-import { Drill, listDrills } from '../use-cases/drills';
-import { getRoutine, RoutineItem } from '../use-cases/routines';
 import {
-  DrillEntry,
-  endSession,
-  getActiveSession,
-  logEntry,
-  Session,
-} from '../use-cases/sessions';
+  ActiveSessionState,
+  canSaveDraft,
+  cancelEntry,
+  endActiveSession,
+  hydrate,
+  loggedCountForDrill,
+  pickDrill,
+  saveDurationEntry,
+  saveEntry,
+  skipPlannedItem,
+  updateDraftAttempted,
+  updateDraftValue,
+  visiblePlannedItems,
+} from '../use-cases/active-session';
+import { Drill } from '../use-cases/drills';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'InSession'> & {
   clock?: () => Date;
@@ -44,128 +51,80 @@ function unitForMetric(metric: Drill['metric']): string {
 }
 
 export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
-  const [session, setSession] = useState<Session | null>(null);
-  const [entries, setEntries] = useState<DrillEntry[]>([]);
-  const [pickerDrills, setPickerDrills] = useState<Drill[]>([]);
-  const [plannedItems, setPlannedItems] = useState<RoutineItem[]>([]);
-  const [skippedItemIds, setSkippedItemIds] = useState<Set<string>>(new Set());
-  const [pickedDrill, setPickedDrill] = useState<Drill | null>(null);
-  const [value, setValue] = useState<string>('');
-  const [attempted, setAttempted] = useState<string>('');
+  const [state, setState] = useState<ActiveSessionState | null>(null);
+  const [loaded, setLoaded] = useState(false);
   const [timerStartedAt, setTimerStartedAt] = useState<Date | null>(null);
   const [, setTick] = useState(0);
 
   useEffect(() => {
     if (!timerStartedAt) return;
     const id = setInterval(() => setTick((t) => t + 1), 500);
-    const sub = AppState.addEventListener('change', (state) => {
-      if (state === 'active') setTick((t) => t + 1);
+    const sub = AppState.addEventListener('change', (s) => {
+      if (s === 'active') setTick((t) => t + 1);
     });
     return () => {
       clearInterval(id);
       sub.remove();
-      // Backstop: if the timer is torn down by any path other than stopTimer
-      // (Cancel, back-nav, unmount), release the wake lock.
+      // Backstop: release the wake lock on any teardown path (Cancel, back-nav, unmount).
       deactivateKeepAwake();
     };
   }, [timerStartedAt]);
 
   const refresh = useCallback(async () => {
-    const db = getAppDb();
-    const active = await getActiveSession(db);
-    if (!active) {
+    const next = await hydrate(getAppDb());
+    if (!next) {
       navigation.goBack();
       return;
     }
-    setSession(active.session);
-    setEntries(active.entries);
-    const all = await listDrills(db);
-    setPickerDrills(all);
-    if (active.session.routineId) {
-      const r = await getRoutine(db, active.session.routineId);
-      setPlannedItems(r?.items ?? []);
-    } else {
-      setPlannedItems([]);
-    }
+    setState(next);
+    setLoaded(true);
   }, [navigation]);
 
   useEffect(() => {
     refresh();
   }, [refresh]);
 
-  function pickDrill(d: Drill) {
-    setPickedDrill(d);
-    setValue(d.metric === 'reps' && d.target != null ? String(d.target) : '');
-    setAttempted(d.metric === 'accuracy' && d.target != null ? String(d.target) : '');
+  function onPickDrill(drillId: string) {
     setTimerStartedAt(null);
+    setState((s) => (s ? pickDrill(s, drillId) : s));
   }
 
-  function cancelEntry() {
-    setPickedDrill(null);
-    setValue('');
-    setAttempted('');
+  function onCancelEntry() {
     setTimerStartedAt(null);
+    setState((s) => (s ? cancelEntry(s) : s));
   }
 
-  function startTimer() {
+  function onStartTimer() {
     setTimerStartedAt(clock());
     activateKeepAwakeAsync().catch(() => {});
   }
 
-  async function stopTimer() {
-    if (!session || !pickedDrill || !timerStartedAt) return;
+  async function onStopTimer() {
+    if (!state || !timerStartedAt) return;
     const elapsedSeconds = Math.floor((clock().getTime() - timerStartedAt.getTime()) / 1000);
     deactivateKeepAwake();
-    await logEntry(getAppDb(), {
-      sessionId: session.id,
-      drillId: pickedDrill.id,
-      value: elapsedSeconds,
-      now: clock,
-    });
-    cancelEntry();
-    await refresh();
+    setTimerStartedAt(null);
+    const next = await saveDurationEntry(state, getAppDb(), { elapsedSeconds, now: clock });
+    setState(next);
   }
 
-  function parseNonNegInt(s: string): number | null {
-    if (!/^\d+$/.test(s)) return null;
-    const n = Number(s);
-    return Number.isInteger(n) ? n : null;
+  async function onSaveEntry() {
+    if (!state) return;
+    const next = await saveEntry(state, getAppDb(), { now: clock });
+    setState(next);
   }
 
-  const valueParsed = parseNonNegInt(value);
-  const attemptedParsed = parseNonNegInt(attempted);
-  const canSaveEntry =
-    pickedDrill?.metric === 'accuracy'
-      ? valueParsed !== null && attemptedParsed !== null
-      : valueParsed !== null;
-
-  async function saveEntry() {
-    if (!session || !pickedDrill || valueParsed === null) return;
-    let attemptedValue: number | undefined;
-    if (pickedDrill.metric === 'accuracy') {
-      if (attemptedParsed === null) return;
-      attemptedValue = attemptedParsed;
-    }
-    await logEntry(getAppDb(), {
-      sessionId: session.id,
-      drillId: pickedDrill.id,
-      value: valueParsed,
-      attempted: attemptedValue,
-      now: clock,
-    });
-    cancelEntry();
-    await refresh();
-  }
-
-  async function end() {
-    if (!session) return;
-    await endSession(getAppDb(), session.id);
+  async function onEnd() {
+    if (!state) return;
+    await endActiveSession(state, getAppDb(), { now: clock });
     navigation.goBack();
   }
 
-  if (!session) return <Screen />;
+  if (!loaded || !state) return <Screen />;
 
-  if (pickedDrill?.metric === 'duration') {
+  const { pickedDrill, draft } = state;
+
+  if (pickedDrill?.metric === 'duration' && draft?.kind === 'duration') {
     const elapsedSeconds = timerStartedAt
       ? Math.max(0, Math.floor((clock().getTime() - timerStartedAt.getTime()) / 1000))
       : 0;
@@ -180,25 +139,25 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
         </View>
         <View style={styles.actionColumn}>
           {timerStartedAt ? (
-            <AppButton title="Stop" onPress={stopTimer} variant="dangerSolid" size="lg" />
+            <AppButton title="Stop" onPress={onStopTimer} variant="dangerSolid" size="lg" />
           ) : (
-            <AppButton title="Start" onPress={startTimer} size="lg" />
+            <AppButton title="Start" onPress={onStartTimer} size="lg" />
           )}
-          <AppButton title="Cancel" onPress={cancelEntry} variant="ghost" />
+          <AppButton title="Cancel" onPress={onCancelEntry} variant="ghost" />
         </View>
       </Screen>
     );
   }
 
-  if (pickedDrill?.metric === 'accuracy') {
+  if (pickedDrill?.metric === 'accuracy' && draft?.kind === 'accuracy') {
     return (
       <Screen edges={['top', 'left', 'right', 'bottom']}>
         <EntryHeader drill={pickedDrill} />
         <View style={styles.fieldRow}>
           <NumberField
             label="Successes"
-            value={value}
-            onChangeText={setValue}
+            value={draft.value}
+            onChangeText={(s) => setState((st) => (st ? updateDraftValue(st, s) : st))}
             accessibilityLabel="accuracy-value-input"
           />
           <View style={styles.slashWrap}>
@@ -206,39 +165,41 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
           </View>
           <NumberField
             label="Attempted"
-            value={attempted}
-            onChangeText={setAttempted}
+            value={draft.attempted}
+            onChangeText={(s) => setState((st) => (st ? updateDraftAttempted(st, s) : st))}
             accessibilityLabel="accuracy-attempted-input"
           />
         </View>
         <View style={styles.actionColumn}>
-          <AppButton title="Save" onPress={saveEntry} size="lg" disabled={!canSaveEntry} />
-          <AppButton title="Cancel" onPress={cancelEntry} variant="ghost" />
+          <AppButton title="Save" onPress={onSaveEntry} size="lg" disabled={!canSaveDraft(state)} />
+          <AppButton title="Cancel" onPress={onCancelEntry} variant="ghost" />
         </View>
       </Screen>
     );
   }
 
-  if (pickedDrill) {
+  if (pickedDrill && draft?.kind === 'reps') {
     return (
       <Screen edges={['top', 'left', 'right', 'bottom']}>
         <EntryHeader drill={pickedDrill} />
         <View style={styles.singleFieldWrap}>
           <NumberField
             label="Reps"
-            value={value}
-            onChangeText={setValue}
+            value={draft.value}
+            onChangeText={(s) => setState((st) => (st ? updateDraftValue(st, s) : st))}
             accessibilityLabel="reps-input"
             wide
           />
         </View>
         <View style={styles.actionColumn}>
-          <AppButton title="Save" onPress={saveEntry} size="lg" disabled={!canSaveEntry} />
-          <AppButton title="Cancel" onPress={cancelEntry} variant="ghost" />
+          <AppButton title="Save" onPress={onSaveEntry} size="lg" disabled={!canSaveDraft(state)} />
+          <AppButton title="Cancel" onPress={onCancelEntry} variant="ghost" />
         </View>
       </Screen>
     );
   }
+
+  const planned = visiblePlannedItems(state);
 
   return (
     <Screen padded={false} edges={['top', 'left', 'right', 'bottom']}>
@@ -249,64 +210,62 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
 
       <View style={styles.body}>
         <FlatList
-          data={pickerDrills}
+          data={state.drills}
           keyExtractor={(d) => d.id}
           contentContainerStyle={styles.pickerList}
           ItemSeparatorComponent={() => <View style={styles.rowSep} />}
           ListHeaderComponent={
             <>
-              {plannedItems.filter((i) => !skippedItemIds.has(i.id)).length > 0 ? (
+              {planned.length > 0 ? (
                 <View style={styles.plannedBlock}>
                   <SectionLabel text="Planned" />
-                  {plannedItems
-                    .filter((i) => !skippedItemIds.has(i.id))
-                    .map((item) => {
-                      const drill = pickerDrills.find((d) => d.id === item.drillId);
-                      const logged = entries.filter((e) => e.drillId === item.drillId).length;
-                      const badge =
-                        item.plannedSets != null
-                          ? `${logged} / ${item.plannedSets}`
-                          : `logged: ${logged}`;
-                      return (
+                  {planned.map((item) => {
+                    const drill = state.drills.find((d) => d.id === item.drillId);
+                    const logged = loggedCountForDrill(state, item.drillId);
+                    const badge =
+                      item.plannedSets != null
+                        ? `${logged} / ${item.plannedSets}`
+                        : `logged: ${logged}`;
+                    return (
+                      <Pressable
+                        key={item.id}
+                        testID={`planned-item-${item.id}`}
+                        onPress={() => drill && onPickDrill(drill.id)}
+                        style={({ pressed }) => [
+                          styles.pickerCard,
+                          pressed ? styles.pickerCardPressed : null,
+                        ]}
+                      >
+                        <View style={styles.pickerCardMain}>
+                          <Text style={styles.pickerName}>{drill?.name ?? 'Drill'}</Text>
+                        </View>
+                        <View style={styles.badge}>
+                          <Text style={styles.badgeText}>{badge}</Text>
+                        </View>
                         <Pressable
-                          key={item.id}
-                          testID={`planned-item-${item.id}`}
-                          onPress={() => drill && pickDrill(drill)}
-                          style={({ pressed }) => [
-                            styles.pickerCard,
-                            pressed ? styles.pickerCardPressed : null,
-                          ]}
+                          testID={`skip-${item.id}`}
+                          onPress={() =>
+                            setState((s) => (s ? skipPlannedItem(s, item.id) : s))
+                          }
+                          hitSlop={8}
+                          style={styles.skipHit}
                         >
-                          <View style={styles.pickerCardMain}>
-                            <Text style={styles.pickerName}>{drill?.name ?? 'Drill'}</Text>
-                          </View>
-                          <View style={styles.badge}>
-                            <Text style={styles.badgeText}>{badge}</Text>
-                          </View>
-                          <Pressable
-                            testID={`skip-${item.id}`}
-                            onPress={() =>
-                              setSkippedItemIds((prev) => new Set(prev).add(item.id))
-                            }
-                            hitSlop={8}
-                            style={styles.skipHit}
-                          >
-                            <Text style={styles.skipText}>Skip</Text>
-                          </Pressable>
+                          <Text style={styles.skipText}>Skip</Text>
                         </Pressable>
-                      );
-                    })}
+                      </Pressable>
+                    );
+                  })}
                 </View>
               ) : null}
               <SectionLabel text="Pick a drill" />
             </>
           }
           ListFooterComponent={
-            entries.length > 0 ? (
+            state.entries.length > 0 ? (
               <View style={styles.entriesBlock}>
                 <SectionLabel text="Logged so far" />
-                {entries.map((e) => {
-                  const drill = pickerDrills.find((d) => d.id === e.drillId);
+                {state.entries.map((e) => {
+                  const drill = state.drills.find((d) => d.id === e.drillId);
                   return (
                     <View key={e.id} style={styles.entryRow}>
                       <Text style={styles.entryName}>{drill?.name ?? 'Drill'}</Text>
@@ -325,7 +284,7 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
           }
           renderItem={({ item }) => (
             <Pressable
-              onPress={() => pickDrill(item)}
+              onPress={() => onPickDrill(item.id)}
               testID={`pick-drill-${item.id}`}
               style={({ pressed }) => [styles.pickerCard, pressed ? styles.pickerCardPressed : null]}
             >
@@ -342,7 +301,7 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
       </View>
 
       <View style={styles.footer}>
-        <AppButton title="End Session" onPress={end} variant="danger" size="lg" />
+        <AppButton title="End Session" onPress={onEnd} variant="danger" size="lg" />
       </View>
     </Screen>
   );
