@@ -1,62 +1,12 @@
-import { useNavigation } from '@react-navigation/native';
-import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import { useCallback, useEffect, useState } from 'react';
-import { Pressable, StyleSheet, Text, View } from 'react-native';
+import { StyleSheet, Text } from 'react-native';
 import { Screen } from '../components/Screen';
-import { getAppDb } from '../db/client';
-import { getActiveSession, Session } from '../use-cases/sessions';
-import type { RootStackParamList } from '../navigation/types';
-import { colors, radius, spacing, typography } from '../theme';
-
-type Nav = NativeStackNavigationProp<RootStackParamList>;
-
-function formatStartedAgo(startedAt: string, now: Date): string {
-  const ms = now.getTime() - new Date(startedAt).getTime();
-  const mins = Math.max(0, Math.floor(ms / 60_000));
-  if (mins < 1) return 'just now';
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.floor(mins / 60);
-  return `${hours}h ago`;
-}
+import { spacing, typography } from '../theme';
 
 export function HomeScreen() {
-  const navigation = useNavigation<Nav>();
-  const [active, setActive] = useState<Session | null>(null);
-  const [loaded, setLoaded] = useState(false);
-
-  const refresh = useCallback(async () => {
-    const result = await getActiveSession(getAppDb());
-    setActive(result?.session ?? null);
-    setLoaded(true);
-  }, []);
-
-  useEffect(() => {
-    const unsub = navigation.addListener('focus', refresh);
-    refresh();
-    return unsub;
-  }, [navigation, refresh]);
-
-  if (!loaded) return <Screen />;
-
   return (
     <Screen>
       <Text style={styles.hello}>Kabe</Text>
       <Text style={styles.tagline}>Solo tennis, tracked.</Text>
-
-      <View style={styles.gap} />
-
-      {active ? (
-        <Pressable
-          onPress={() => navigation.navigate('InSession')}
-          style={({ pressed }) => [styles.resumeCard, pressed ? styles.resumeCardPressed : null]}
-        >
-          <Text style={styles.resumeLabel}>Session in progress</Text>
-          <Text style={styles.resumeTitle}>Resume Session</Text>
-          <Text style={styles.resumeMeta}>
-            started {formatStartedAgo(active.startedAt, new Date())}
-          </Text>
-        </Pressable>
-      ) : null}
     </Screen>
   );
 }
@@ -66,31 +16,6 @@ const styles = StyleSheet.create({
     ...typography.display,
   },
   tagline: {
-    ...typography.bodyMuted,
-    marginTop: spacing.xs,
-  },
-  gap: {
-    height: spacing.xxl,
-  },
-  resumeCard: {
-    backgroundColor: colors.accentSoft,
-    borderRadius: radius.lg,
-    padding: spacing.xl,
-    borderWidth: 1,
-    borderColor: colors.accent,
-  },
-  resumeCardPressed: {
-    opacity: 0.85,
-  },
-  resumeLabel: {
-    ...typography.label,
-    color: colors.accent,
-  },
-  resumeTitle: {
-    ...typography.title,
-    marginTop: spacing.xs,
-  },
-  resumeMeta: {
     ...typography.bodyMuted,
     marginTop: spacing.xs,
   },

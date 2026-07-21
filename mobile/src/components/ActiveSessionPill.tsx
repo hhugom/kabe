@@ -14,7 +14,7 @@ export function ActiveSessionPill({ onPress }: Props) {
   return (
     <Pressable onPress={onPress} testID="active-session-pill" style={styles.pill}>
       <View style={styles.row}>
-        <Icon name="play-arrow" size={24} color={colors.onAccent} />
+        <Icon name="play-arrow" size={24} color={colors.onAmber} />
         <Text style={styles.label}>Resume Session</Text>
       </View>
     </Pressable>
@@ -37,6 +37,6 @@ const styles = StyleSheet.create({
   },
   label: {
     ...typography.title,
-    color: colors.onAccent,
+    color: colors.onAmber,
   },
 });

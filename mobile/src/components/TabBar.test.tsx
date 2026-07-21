@@ -177,6 +177,37 @@ describe('TabBar', () => {
     expect(navigate).not.toHaveBeenCalled();
   });
 
+  it('idle: renders a visible "START" label on the center button with accentCyan fill', async () => {
+    // Idle state per docs/conventions/navigation-surface.md § Tab-bar center action.
+    const { findByText, findByTestId } = await render(<TabBar {...makeProps()} />);
+    expect(await findByText('START')).toBeTruthy();
+    expect(flatStyle(await findByTestId('tab-touch-Start')).backgroundColor).toBe(colors.accent);
+  });
+
+  it('morphs the center button to RESUME with accentAmber fill when sessionActive', async () => {
+    // Active-session state per navigation-surface.md § Tab-bar center action § Active-session state
+    // and issue #16: label RESUME, fill accentAmber, text black (AAA).
+    const { findByText, findByTestId } = await render(
+      <TabBar {...makeProps({ sessionActive: true } as any)} />
+    );
+    expect(await findByText('RESUME')).toBeTruthy();
+    const button = await findByTestId('tab-touch-Start');
+    expect(flatStyle(button).backgroundColor).toBe(colors.accentAmber);
+    // RESUME text uses onAmber (black) for AAA contrast on amber.
+    expect(flatStyle(await findByText('RESUME')).color).toBe(colors.onAmber);
+  });
+
+  it('pressing the center button in resume state calls onResumePress, not onStartPress', async () => {
+    const onStartPress = jest.fn();
+    const onResumePress = jest.fn();
+    const { findByTestId } = await render(
+      <TabBar {...makeProps({ sessionActive: true, onStartPress, onResumePress } as any)} />
+    );
+    fireEvent.press(await findByTestId('tab-touch-Start'));
+    expect(onResumePress).toHaveBeenCalledTimes(1);
+    expect(onStartPress).not.toHaveBeenCalled();
+  });
+
   it('wraps the active tab in an M3 pill: accentCyan fill + onAccent label', async () => {
     // state.index = 1 → Drills is active
     const { findByTestId, findByText } = await render(

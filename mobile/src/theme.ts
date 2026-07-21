@@ -19,6 +19,7 @@ export const colors = {
   danger: '#FF6B6B',
   dangerPressed: '#CC5555',
   onAccent: '#000000',
+  onAmber: '#000000',
 };
 
 export const spacing = {

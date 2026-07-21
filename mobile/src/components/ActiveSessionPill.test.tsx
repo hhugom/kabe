@@ -32,10 +32,10 @@ describe('ActiveSessionPill', () => {
     expect(style.backgroundColor).toBe(colors.accentAmber);
   });
 
-  it('renders label text in onAccent (black) for AAA contrast on amber', async () => {
+  it('renders label text in onAmber (black) for AAA contrast on amber', async () => {
     const { findByText } = await render(<ActiveSessionPill onPress={() => {}} />);
     const style = flatStyle(await findByText('Resume Session'));
-    expect(style.color).toBe(colors.onAccent);
+    expect(style.color).toBe(colors.onAmber);
   });
 
   it('spans full width of its parent', async () => {
