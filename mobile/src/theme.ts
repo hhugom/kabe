@@ -46,7 +46,13 @@ export const typography = {
     fontVariant: ['tabular-nums'] as ['tabular-nums'],
     letterSpacing: -1,
   },
-  display: { fontSize: 44, lineHeight: 48, fontWeight: '800' as const, color: colors.textPrimary },
+  display: {
+    fontSize: 44,
+    lineHeight: 48,
+    fontWeight: '800' as const,
+    color: colors.textPrimary,
+    fontVariant: ['tabular-nums'] as ['tabular-nums'],
+  },
   title: { fontSize: 24, lineHeight: 30, fontWeight: '700' as const, color: colors.textPrimary },
   subtitle: {
     fontSize: 17,
@@ -65,12 +71,4 @@ export const typography = {
     textTransform: 'uppercase' as const,
   },
   caption: { fontSize: 13, lineHeight: 18, fontWeight: '500' as const, color: colors.textMuted },
-  mono: {
-    fontSize: 112,
-    lineHeight: 116,
-    fontWeight: '800' as const,
-    color: colors.textPrimary,
-    fontVariant: ['tabular-nums'] as ['tabular-nums'],
-    letterSpacing: -1,
-  },
 };

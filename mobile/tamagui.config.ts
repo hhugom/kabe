@@ -3,6 +3,8 @@ import { createMedia } from '@tamagui/react-native-media-driver';
 import { createTamagui, type TamaguiInternalConfig } from 'tamagui';
 import { colors } from './src/theme';
 
+export { typography } from './src/theme';
+
 // Zwift-HUD dark theme — palette from docs/conventions/aesthetic-direction.md.
 // Only the tokens Tamagui-based components read at render time need to be present;
 // hand-rolled StyleSheet screens still consume `colors.*` directly from src/theme.ts.
