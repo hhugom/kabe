@@ -2,6 +2,7 @@ import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { AppButton } from '../components/AppButton';
+import { Icon } from '../components/Icon';
 import { Screen } from '../components/Screen';
 import { getAppDb } from '../db/client';
 import type { RootStackParamList } from '../navigation/types';
@@ -138,7 +139,10 @@ export function RoutineEditorScreen({ navigation, route }: Props) {
                     hitSlop={8}
                     style={styles.iconBtn}
                   >
-                    <Text style={[styles.iconText, index === 0 ? styles.iconDisabled : null]}>▲</Text>
+                    <Icon
+                      name="arrow-upward"
+                      color={index === 0 ? colors.textMuted : colors.textSecondary}
+                    />
                   </Pressable>
                   <Pressable
                     testID={`move-down-${item.key}`}
@@ -147,11 +151,10 @@ export function RoutineEditorScreen({ navigation, route }: Props) {
                     hitSlop={8}
                     style={styles.iconBtn}
                   >
-                    <Text
-                      style={[styles.iconText, index === items.length - 1 ? styles.iconDisabled : null]}
-                    >
-                      ▼
-                    </Text>
+                    <Icon
+                      name="arrow-downward"
+                      color={index === items.length - 1 ? colors.textMuted : colors.textSecondary}
+                    />
                   </Pressable>
                   <Pressable
                     testID={`remove-${item.key}`}
@@ -159,7 +162,7 @@ export function RoutineEditorScreen({ navigation, route }: Props) {
                     hitSlop={8}
                     style={styles.iconBtn}
                   >
-                    <Text style={[styles.iconText, styles.removeText]}>✕</Text>
+                    <Icon name="close" color={colors.danger} />
                   </Pressable>
                 </View>
               </View>
@@ -264,16 +267,6 @@ const styles = StyleSheet.create({
   iconBtn: {
     paddingHorizontal: spacing.sm,
     paddingVertical: spacing.xs,
-  },
-  iconText: {
-    ...typography.body,
-    color: colors.textSecondary,
-  },
-  iconDisabled: {
-    color: colors.textMuted,
-  },
-  removeText: {
-    color: colors.danger,
   },
   addCard: {
     backgroundColor: colors.surface,
