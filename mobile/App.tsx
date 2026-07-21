@@ -16,6 +16,7 @@ import { colors, spacing, typography } from './src/theme';
 import { getAppDb } from './src/db/client';
 import migrations from './src/db/migrations';
 import type { RootStackParamList } from './src/navigation/types';
+import { TabBar } from './src/components/TabBar';
 import { ArchetypesDemoScreen } from './src/screens/ArchetypesDemoScreen';
 import { DrillsScreen } from './src/screens/DrillsScreen';
 import { HomeScreen } from './src/screens/HomeScreen';
@@ -32,19 +33,8 @@ const RootStack = createNativeStackNavigator<RootStackParamList>();
 function Tabs() {
   return (
     <Tab.Navigator
-      screenOptions={{
-        headerShown: false,
-        tabBarActiveTintColor: colors.accent,
-        tabBarInactiveTintColor: colors.textSecondary,
-        tabBarStyle: {
-          backgroundColor: colors.surface,
-          borderTopColor: colors.border,
-        },
-        tabBarLabelStyle: {
-          fontSize: 12,
-          fontWeight: '600',
-        },
-      }}
+      screenOptions={{ headerShown: false, tabBarHideOnKeyboard: true }}
+      tabBar={(props) => <TabBar {...props} />}
     >
       <Tab.Screen name="Home" component={HomeScreen} />
       <Tab.Screen name="Drills" component={DrillsScreen} />
