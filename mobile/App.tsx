@@ -16,6 +16,7 @@ import { colors, spacing, typography } from './src/theme';
 import { getAppDb } from './src/db/client';
 import migrations from './src/db/migrations';
 import type { RootStackParamList } from './src/navigation/types';
+import { ArchetypesDemoScreen } from './src/screens/ArchetypesDemoScreen';
 import { DrillsScreen } from './src/screens/DrillsScreen';
 import { HomeScreen } from './src/screens/HomeScreen';
 import { InSessionScreen } from './src/screens/InSessionScreen';
@@ -119,6 +120,11 @@ export default function App() {
             name="InSession"
             component={InSessionScreen}
             options={{ title: 'Session' }}
+          />
+          <RootStack.Screen
+            name="ArchetypesDemo"
+            component={ArchetypesDemoScreen}
+            options={{ title: 'Screen archetypes' }}
           />
         </RootStack.Navigator>
         <StatusBar style="auto" />
