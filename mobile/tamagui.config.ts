@@ -1,4 +1,5 @@
 import { configWithoutAnimations } from '@tamagui/config';
+import { animationsReactNative } from '@tamagui/config/v5-rn';
 import { createMedia } from '@tamagui/react-native-media-driver';
 import { createTamagui, type TamaguiInternalConfig } from 'tamagui';
 import { colors } from './src/theme';
@@ -53,6 +54,7 @@ const kabe_dark = {
 
 const config: TamaguiInternalConfig = createTamagui({
   ...configWithoutAnimations,
+  animations: animationsReactNative,
   themes: {
     ...configWithoutAnimations.themes,
     kabe_dark,

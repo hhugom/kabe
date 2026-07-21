@@ -2,10 +2,9 @@ import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useCallback, useEffect, useState } from 'react';
 import { Pressable, StyleSheet, Text, View } from 'react-native';
-import { AppButton } from '../components/AppButton';
 import { Screen } from '../components/Screen';
 import { getAppDb } from '../db/client';
-import { getActiveSession, Session, startSession } from '../use-cases/sessions';
+import { getActiveSession, Session } from '../use-cases/sessions';
 import type { RootStackParamList } from '../navigation/types';
 import { colors, radius, spacing, typography } from '../theme';
 
@@ -37,12 +36,6 @@ export function HomeScreen() {
     return unsub;
   }, [navigation, refresh]);
 
-  async function onStart() {
-    await startSession(getAppDb());
-    await refresh();
-    navigation.navigate('InSession');
-  }
-
   if (!loaded) return <Screen />;
 
   return (
@@ -63,17 +56,7 @@ export function HomeScreen() {
             started {formatStartedAgo(active.startedAt, new Date())}
           </Text>
         </Pressable>
-      ) : (
-        <View style={styles.startStack}>
-          <AppButton title="Start Session" onPress={onStart} size="lg" />
-          <AppButton
-            title="Start from Routine"
-            onPress={() => navigation.navigate('PickRoutine')}
-            variant="secondary"
-            size="lg"
-          />
-        </View>
-      )}
+      ) : null}
     </Screen>
   );
 }
@@ -88,9 +71,6 @@ const styles = StyleSheet.create({
   },
   gap: {
     height: spacing.xxl,
-  },
-  startStack: {
-    gap: spacing.md,
   },
   resumeCard: {
     backgroundColor: colors.accentSoft,

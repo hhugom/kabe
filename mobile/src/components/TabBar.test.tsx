@@ -31,6 +31,7 @@ function makeProps(overrides: Partial<TabBarProps> = {}): TabBarProps {
       navigate: jest.fn(),
     },
     insets: { top: 0, right: 0, bottom: 0, left: 0 },
+    onStartPress: jest.fn(),
     ...overrides,
   } as unknown as TabBarProps;
 }
@@ -132,6 +133,48 @@ describe('TabBar', () => {
     const { findByText } = await render(<TabBar {...makeProps()} />);
     expect(flatStyle(await findByText('Drills')).color).toBe(colors.textSecondary);
     expect(flatStyle(await findByText('Stats')).color).toBe(colors.textSecondary);
+  });
+
+  it('renders a centered START slot as a fourth, raised action', async () => {
+    // Center action per docs/conventions/navigation-surface.md § Tab-bar center action.
+    // Raised circular button, icon-only.
+    const { findByTestId } = await render(<TabBar {...makeProps()} />);
+    expect(await findByTestId('tab-touch-Start')).toBeTruthy();
+  });
+
+  it('renders the START button as a circle (borderRadius = size / 2) with accent-cyan fill', async () => {
+    const { findByTestId } = await render(<TabBar {...makeProps()} />);
+    const style = flatStyle(await findByTestId('tab-touch-Start'));
+    expect(style.backgroundColor).toBe(colors.accent);
+    expect(typeof style.width).toBe('number');
+    expect(style.height).toBe(style.width);
+    expect(style.borderRadius).toBe(style.width / 2);
+  });
+
+  it('anchors the START button to protrude 1/3 above the tab bar', async () => {
+    const { findByTestId } = await render(<TabBar {...makeProps()} />);
+    const buttonStyle = flatStyle(await findByTestId('tab-touch-Start'));
+    // The anchor wraps the button. Verify the anchor's top offset is -size/3
+    // so the top third of the circle overflows the bar.
+    const anchor = (await findByTestId('tab-touch-Start')).parent!;
+    const anchorStyle = flatStyle(anchor);
+    expect(anchorStyle.top).toBe(-buttonStyle.height / 3);
+    expect(anchorStyle.position).toBe('absolute');
+    expect(anchorStyle.alignItems).toBe('center');
+  });
+
+  it('pressing START calls onStartPress (does not navigate)', async () => {
+    const onStartPress = jest.fn();
+    const emit = jest.fn(() => ({ defaultPrevented: false }));
+    const navigate = jest.fn();
+    const props = makeProps({
+      navigation: { emit, navigate } as any,
+      onStartPress,
+    });
+    const { findByTestId } = await render(<TabBar {...props} />);
+    fireEvent.press(await findByTestId('tab-touch-Start'));
+    expect(onStartPress).toHaveBeenCalledTimes(1);
+    expect(navigate).not.toHaveBeenCalled();
   });
 
   it('wraps the active tab in an M3 pill: accentCyan fill + onAccent label', async () => {

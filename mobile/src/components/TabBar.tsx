@@ -4,7 +4,9 @@ import { Keyboard, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Icon, type IconName } from './Icon';
 import { colors, radius, spacing } from '../theme';
 
-export type TabBarProps = BottomTabBarProps;
+export type TabBarProps = BottomTabBarProps & {
+  onStartPress?: () => void;
+};
 
 const ICON_FOR: Record<string, IconName> = {
   Home: 'home',
@@ -17,7 +19,11 @@ function iconFor(routeName: string): IconName {
   return ICON_FOR[routeName] ?? 'radio-button-unchecked';
 }
 
-export function TabBar({ state, navigation, insets }: TabBarProps) {
+// Raised circular START button — 2/3 seated in the bar, 1/3 overflowing above it
+// (Strava/Zwift pattern per docs/conventions/navigation-surface.md § Tab-bar center action).
+const START_SIZE = 64;
+
+export function TabBar({ state, navigation, insets, onStartPress }: TabBarProps) {
   const [keyboardVisible, setKeyboardVisible] = useState(false);
 
   useEffect(() => {
@@ -70,6 +76,15 @@ export function TabBar({ state, navigation, insets }: TabBarProps) {
           </Pressable>
         );
       })}
+      <View pointerEvents="box-none" style={styles.centerAnchor}>
+        <Pressable
+          testID="tab-touch-Start"
+          onPress={onStartPress}
+          style={styles.startButton}
+        >
+          <Icon name="play-arrow" size={32} color={colors.onAccent} />
+        </Pressable>
+      </View>
     </View>
   );
 }
@@ -110,5 +125,20 @@ const styles = StyleSheet.create({
   },
   labelInactive: {
     color: colors.textSecondary,
+  },
+  centerAnchor: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: -START_SIZE / 3,
+    alignItems: 'center',
+  },
+  startButton: {
+    width: START_SIZE,
+    height: START_SIZE,
+    borderRadius: START_SIZE / 2,
+    backgroundColor: colors.accent,
+    alignItems: 'center',
+    justifyContent: 'center',
   },
 });

@@ -1,8 +1,8 @@
 import 'react-native-get-random-values';
 
-import { NavigationContainer } from '@react-navigation/native';
+import { NavigationContainer, useNavigation } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
-import { createNativeStackNavigator } from '@react-navigation/native-stack';
+import { createNativeStackNavigator, type NativeStackNavigationProp } from '@react-navigation/native-stack';
 import { useMigrations } from 'drizzle-orm/expo-sqlite/migrator';
 import { useEffect, useState } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
@@ -16,12 +16,12 @@ import { colors, spacing, typography } from './src/theme';
 import { getAppDb } from './src/db/client';
 import migrations from './src/db/migrations';
 import type { RootStackParamList } from './src/navigation/types';
+import { PickRoutineSheet } from './src/components/PickRoutineSheet';
 import { TabBar } from './src/components/TabBar';
 import { ArchetypesDemoScreen } from './src/screens/ArchetypesDemoScreen';
 import { DrillsScreen } from './src/screens/DrillsScreen';
 import { HomeScreen } from './src/screens/HomeScreen';
 import { InSessionScreen } from './src/screens/InSessionScreen';
-import { PickRoutineScreen } from './src/screens/PickRoutineScreen';
 import { RoutineEditorScreen } from './src/screens/RoutineEditorScreen';
 import { StatsScreen } from './src/screens/StatsScreen';
 import { seedIfEmpty } from './src/use-cases/drills';
@@ -31,15 +31,27 @@ const Tab = createBottomTabNavigator();
 const RootStack = createNativeStackNavigator<RootStackParamList>();
 
 function Tabs() {
+  const rootNav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const [pickerOpen, setPickerOpen] = useState(false);
   return (
-    <Tab.Navigator
-      screenOptions={{ headerShown: false, tabBarHideOnKeyboard: true }}
-      tabBar={(props) => <TabBar {...props} />}
-    >
-      <Tab.Screen name="Home" component={HomeScreen} />
-      <Tab.Screen name="Drills" component={DrillsScreen} />
-      <Tab.Screen name="Stats" component={StatsScreen} />
-    </Tab.Navigator>
+    <>
+      <Tab.Navigator
+        screenOptions={{ headerShown: false, tabBarHideOnKeyboard: true }}
+        tabBar={(props) => <TabBar {...props} onStartPress={() => setPickerOpen(true)} />}
+      >
+        <Tab.Screen name="Home" component={HomeScreen} />
+        <Tab.Screen name="Drills" component={DrillsScreen} />
+        <Tab.Screen name="Stats" component={StatsScreen} />
+      </Tab.Navigator>
+      <PickRoutineSheet
+        open={pickerOpen}
+        onOpenChange={setPickerOpen}
+        onStarted={() => {
+          setPickerOpen(false);
+          rootNav.navigate('InSession');
+        }}
+      />
+    </>
   );
 }
 
@@ -94,11 +106,6 @@ export default function App() {
           }}
         >
           <RootStack.Screen name="Tabs" component={Tabs} options={{ headerShown: false }} />
-          <RootStack.Screen
-            name="PickRoutine"
-            component={PickRoutineScreen}
-            options={{ title: 'Pick a routine' }}
-          />
           <RootStack.Screen
             name="RoutineEditor"
             component={RoutineEditorScreen}
