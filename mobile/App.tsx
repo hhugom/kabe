@@ -102,13 +102,15 @@ export default function App() {
   }, [migrated, db]);
 
   const renderPillHeader = useCallback(
-    ({ options, navigation, back }: NativeStackHeaderProps) => {
+    ({ options, route, navigation, back }: NativeStackHeaderProps) => {
       const nav = navigation as NativeStackNavigationProp<RootStackParamList>;
+      // Pill is suppressed on InSession itself — see navigation-surface.md § Active-session pill.
+      const showPill = sessionActive && route.name !== 'InSession';
       return (
         <PillHeader
           title={typeof options.title === 'string' ? options.title : ''}
           onBack={back ? () => nav.goBack() : undefined}
-          sessionActive={sessionActive}
+          sessionActive={showPill}
           onResumePress={() => nav.navigate('InSession')}
         />
       );
@@ -176,7 +178,7 @@ export default function App() {
           <RootStack.Screen
             name="InSession"
             component={InSessionScreen}
-            options={{ title: 'Session' }}
+            options={{ title: 'Session', header: renderPillHeader }}
           />
           <RootStack.Screen
             name="ArchetypesDemo"
