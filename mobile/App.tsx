@@ -28,6 +28,7 @@ import { DrillsScreen } from './src/screens/DrillsScreen';
 import { HomeScreen } from './src/screens/HomeScreen';
 import { InSessionScreen } from './src/screens/InSessionScreen';
 import { RoutineEditorScreen } from './src/screens/RoutineEditorScreen';
+import { RoutinesScreen } from './src/screens/RoutinesScreen';
 import { StatsScreen } from './src/screens/StatsScreen';
 import { seedIfEmpty } from './src/use-cases/drills';
 import { seedRoutinesIfEmpty } from './src/use-cases/routines';
@@ -58,7 +59,7 @@ function Tabs({ sessionActive, refreshSessionActive }: TabsProps) {
         )}
       >
         <Tab.Screen name="Home" component={HomeScreen} />
-        <Tab.Screen name="Drills" component={DrillsScreen} />
+        <Tab.Screen name="Routines" component={RoutinesScreen} />
         <Tab.Screen name="Stats" component={StatsScreen} />
       </Tab.Navigator>
       <PickRoutineSheet
@@ -166,6 +167,11 @@ export default function App() {
               title: route.params?.routineId ? 'Edit routine' : 'New routine',
               header: renderPillHeader,
             })}
+          />
+          <RootStack.Screen
+            name="Drills"
+            component={DrillsScreen}
+            options={{ title: 'Drills', header: renderPillHeader }}
           />
           <RootStack.Screen
             name="InSession"

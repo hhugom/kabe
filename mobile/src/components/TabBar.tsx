@@ -12,9 +12,8 @@ export type TabBarProps = BottomTabBarProps & {
 
 const ICON_FOR: Record<string, IconName> = {
   Home: 'home',
-  Drills: 'sports-tennis',
-  Stats: 'bar-chart',
   Routines: 'list',
+  Stats: 'bar-chart',
 };
 
 function iconFor(routeName: string): IconName {
