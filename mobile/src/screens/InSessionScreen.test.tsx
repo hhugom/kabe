@@ -158,11 +158,15 @@ async function renderScreen(opts: { clock?: () => Date } = {}) {
   } as any;
   currentNavigation = navigation;
   const route = { key: 'k', name: 'InSession' } as any;
-  return render(
-    <TamaguiProvider config={tamaguiConfig} defaultTheme="kabe_dark">
-      <InSessionScreen navigation={navigation} route={route} clock={opts.clock} />
-    </TamaguiProvider>
-  );
+  let result: ReturnType<typeof render>;
+  await act(async () => {
+    result = render(
+      <TamaguiProvider config={tamaguiConfig} defaultTheme="kabe_dark">
+        <InSessionScreen navigation={navigation} route={route} clock={opts.clock} />
+      </TamaguiProvider>
+    );
+  });
+  return result!;
 }
 
 describe('InSessionScreen — timer, wake-lock, and navigation', () => {
@@ -178,6 +182,7 @@ describe('InSessionScreen — timer, wake-lock, and navigation', () => {
     mockGetActiveSession.mockResolvedValue({ session: makeSession(), entries: [] });
     mockLogEntry.mockResolvedValue(makeEntry());
     mockGetRoutine.mockResolvedValue(null);
+    mockEndSession.mockResolvedValue(undefined as any);
     mockAddADrillSheetProps.length = 0;
   });
 
@@ -356,8 +361,9 @@ describe('InSessionScreen — timer, wake-lock, and navigation', () => {
     const drill = makeDrill({ id: 'reps-m', name: 'Serve reps', metric: 'reps' });
     mockListDrills.mockResolvedValue([drill]);
 
-    const { findByTestId, findByLabelText, queryByTestId } = await renderScreen();
-    fireEvent.press(await findByTestId('pick-drill-reps-m'));
+    const { findByTestId, findByText, findByLabelText, queryByTestId } = await renderScreen();
+    fireEvent.press(await findByText('Add a drill'));
+    fireEvent.press(await findByTestId('add-a-drill-row-reps-m'));
     // Reps entry screen surfaces the REPS number field.
     await findByLabelText('reps-input');
     expect(queryByTestId('session-menu-end-session')).toBeNull();
@@ -371,8 +377,9 @@ describe('InSessionScreen — timer, wake-lock, and navigation', () => {
     const drill = makeDrill({ id: 'acc-m', name: 'Serve accuracy', metric: 'accuracy' });
     mockListDrills.mockResolvedValue([drill]);
 
-    const { findByTestId, findByLabelText, queryByTestId } = await renderScreen();
-    fireEvent.press(await findByTestId('pick-drill-acc-m'));
+    const { findByTestId, findByText, findByLabelText, queryByTestId } = await renderScreen();
+    fireEvent.press(await findByText('Add a drill'));
+    fireEvent.press(await findByTestId('add-a-drill-row-acc-m'));
     await findByLabelText('accuracy-value-input');
     expect(queryByTestId('session-menu-end-session')).toBeNull();
 
@@ -386,7 +393,8 @@ describe('InSessionScreen — timer, wake-lock, and navigation', () => {
     mockListDrills.mockResolvedValue([drill]);
 
     const { findByTestId, findByText, queryByTestId } = await renderScreen();
-    fireEvent.press(await findByTestId('pick-drill-dur-m'));
+    fireEvent.press(await findByText('Add a drill'));
+    fireEvent.press(await findByTestId('add-a-drill-row-dur-m'));
     await findByText('Start');
     expect(queryByTestId('session-menu-end-session')).toBeNull();
 
@@ -402,8 +410,13 @@ describe('InSessionScreen — timer, wake-lock, and navigation', () => {
     await findByText('What are you working on?');
 
     await pressHeaderMenu();
-    fireEvent.press(await findByTestId('session-menu-end-session'));
-    await act(async () => {});
+    await act(async () => {
+      fireEvent.press(await findByTestId('session-menu-end-session'));
+      // onEndSession fires an async `onEnd` chain (endActiveSession → endSession →
+      // navigation.goBack). Wait a tick so the chain settles inside this act scope
+      // — otherwise it resolves during the next test and contaminates it.
+      await new Promise((res) => setImmediate(res));
+    });
 
     expect(mockEndSession).toHaveBeenCalledWith(
       null,
