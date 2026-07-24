@@ -9,6 +9,19 @@ import type { DrillEntry, Session } from '../use-cases/sessions';
 import { endSession, getActiveSession, logEntry } from '../use-cases/sessions';
 import { InSessionScreen } from './InSessionScreen';
 
+// Tamagui Sheet is proven in SheetLayout tests; here we render children inline
+// when `open` is true so the SessionMenuSheet content becomes queryable.
+jest.mock('tamagui', () => {
+  const actual = jest.requireActual('tamagui');
+  function MockSheet(props: any) {
+    return props.open ? props.children : null;
+  }
+  MockSheet.Overlay = (_: any) => null;
+  MockSheet.Handle = (_: any) => null;
+  MockSheet.Frame = ({ children }: any) => children;
+  return { ...actual, Sheet: MockSheet };
+});
+
 jest.mock('../use-cases/drills', () => ({
   listDrills: jest.fn(),
 }));
@@ -115,10 +128,34 @@ function makeEntry(over: Partial<DrillEntry> = {}): DrillEntry {
   };
 }
 
-let currentNavigation: { goBack: jest.Mock; navigate: jest.Mock } | null = null;
+let currentNavigation: {
+  goBack: jest.Mock;
+  navigate: jest.Mock;
+  setOptions: jest.Mock;
+} | null = null;
+
+// Reads the last `onMenuPress` handler registered via navigation.setOptions.
+// This mirrors what App.tsx#renderPillHeader does with the header's three-dot.
+async function pressHeaderMenu() {
+  if (!currentNavigation) throw new Error('renderScreen not called');
+  for (let i = currentNavigation.setOptions.mock.calls.length - 1; i >= 0; i--) {
+    const opts = currentNavigation.setOptions.mock.calls[i][0];
+    if (opts && typeof opts.onMenuPress === 'function') {
+      await act(async () => {
+        opts.onMenuPress();
+      });
+      return;
+    }
+  }
+  throw new Error('no onMenuPress registered via setOptions');
+}
 
 async function renderScreen(opts: { clock?: () => Date } = {}) {
-  const navigation = { goBack: jest.fn(), navigate: jest.fn() } as any;
+  const navigation = {
+    goBack: jest.fn(),
+    navigate: jest.fn(),
+    setOptions: jest.fn(),
+  } as any;
   currentNavigation = navigation;
   const route = { key: 'k', name: 'InSession' } as any;
   return render(
@@ -288,6 +325,20 @@ describe('InSessionScreen — timer, wake-lock, and navigation', () => {
     } finally {
       addListenerSpy.mockRestore();
     }
+  });
+
+  it('pressing the header three-dot on the picker branch opens the Session menu sheet', async () => {
+    mockListDrills.mockResolvedValue([]);
+
+    const { findByText, findByTestId, queryByTestId } = await renderScreen();
+    // The picker renders the "What are you working on?" prompt; assert we're on it,
+    // and that the sheet's End Session row (testID) is not present until the menu opens.
+    await findByText('What are you working on?');
+    expect(queryByTestId('session-menu-end-session')).toBeNull();
+
+    await pressHeaderMenu();
+
+    expect(await findByTestId('session-menu-end-session')).toBeTruthy();
   });
 
   it('End Session calls endSession and navigates back', async () => {
