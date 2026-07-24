@@ -1,4 +1,6 @@
 import { fireEvent, render } from '@testing-library/react-native';
+import { TamaguiProvider } from 'tamagui';
+import tamaguiConfig from '../../tamagui.config';
 import type { Drill } from '../use-cases/drills';
 import { listDrills } from '../use-cases/drills';
 import type { Routine, RoutineItem } from '../use-cases/routines';
@@ -9,6 +11,19 @@ import {
   updateRoutine,
 } from '../use-cases/routines';
 import { RoutineEditorScreen } from './RoutineEditorScreen';
+
+// Sheet primitive is Tamagui's concern (proven in SheetLayout tests). Here we
+// mock it out so the Routine menu sheet's children render inline when `open`.
+jest.mock('tamagui', () => {
+  const actual = jest.requireActual('tamagui');
+  function MockSheet(props: any) {
+    return props.open ? props.children : null;
+  }
+  MockSheet.Overlay = (_: any) => null;
+  MockSheet.Handle = (_: any) => null;
+  MockSheet.Frame = ({ children }: any) => children;
+  return { ...actual, Sheet: MockSheet };
+});
 
 jest.mock('../use-cases/drills', () => ({
   listDrills: jest.fn(),
@@ -70,10 +85,25 @@ function makeRoutineItem(over: Partial<RoutineItem>): RoutineItem {
 
 let capturedNavigation: any;
 async function renderScreen(params: { routineId?: string } = {}) {
-  const navigation = { goBack: jest.fn(), navigate: jest.fn(), replace: jest.fn() } as any;
+  const navigation = {
+    goBack: jest.fn(),
+    navigate: jest.fn(),
+    replace: jest.fn(),
+    setOptions: jest.fn(),
+  } as any;
   capturedNavigation = navigation;
   const route = { key: 'k', name: 'RoutineEditor', params } as any;
-  return render(<RoutineEditorScreen navigation={navigation} route={route} />);
+  return render(
+    <TamaguiProvider config={tamaguiConfig} defaultTheme="kabe_dark">
+      <RoutineEditorScreen navigation={navigation} route={route} />
+    </TamaguiProvider>
+  );
+}
+
+function mergedSetOptions(): Record<string, any> {
+  return capturedNavigation.setOptions.mock.calls
+    .map((c: any[]) => c[0])
+    .reduce((acc: any, next: any) => ({ ...acc, ...next }), {});
 }
 
 beforeEach(() => {
@@ -209,28 +239,79 @@ describe('RoutineEditorScreen (edit mode)', () => {
     );
   });
 
-  it('Archive routine button is not shown in create mode', async () => {
+  it('create mode does not expose a header menu handler (no three-dot to open)', async () => {
+    mockListDrills.mockResolvedValue([]);
+    await renderScreen();
+    await Promise.resolve();
+    // Screen may call setOptions for the header title etc.; what matters is
+    // no onMenuPress handler is registered — the PillHeader hides the three-dot
+    // when onMenuPress is undefined (see PillHeader.test.tsx).
+    expect(mergedSetOptions().onMenuPress).toBeUndefined();
+  });
+
+  it('create mode does not render the footer Archive button', async () => {
     mockListDrills.mockResolvedValue([]);
     const { queryByText } = await renderScreen();
     await Promise.resolve();
     expect(queryByText('Archive routine')).toBeNull();
   });
 
-  it('Archive routine calls archiveRoutine with the id and navigates back', async () => {
+  it('edit mode registers a header menu handler that opens the Routine menu sheet', async () => {
+    mockListDrills.mockResolvedValue([makeDrill({ id: 'd-a', name: 'Wall rally' })]);
+    mockGetRoutine.mockResolvedValue({
+      routine: makeRoutine({ id: 'r-1', name: 'Existing' }),
+      items: [makeRoutineItem({ id: 'ri-1', drillId: 'd-a', plannedSets: 1, position: 0 })],
+    });
+
+    const { findByLabelText, findByText, queryByText } = await renderScreen({ routineId: 'r-1' });
+    // Wait for the load effect to resolve so setOptions has been called with edit-mode wiring.
+    await findByLabelText('routine-name-input');
+
+    // Sheet is closed until the header menu handler fires — no Archive row visible yet.
+    expect(queryByText('Archive routine')).toBeNull();
+
+    const opts = mergedSetOptions();
+    expect(typeof opts.onMenuPress).toBe('function');
+
+    // Simulate PillHeader firing the handler.
+    opts.onMenuPress();
+
+    expect(await findByText('Archive routine')).toBeTruthy();
+  });
+
+  it('Archive from the Routine menu sheet calls archiveRoutine with the id and navigates back', async () => {
     mockListDrills.mockResolvedValue([makeDrill({ id: 'd-a', name: 'Wall rally' })]);
     mockGetRoutine.mockResolvedValue({
       routine: makeRoutine({ id: 'r-9', name: 'Bye bye' }),
       items: [makeRoutineItem({ id: 'ri-1', drillId: 'd-a', plannedSets: 1, position: 0 })],
     });
 
-    const { findByText } = await renderScreen({ routineId: 'r-9' });
-    fireEvent.press(await findByText('Archive routine'));
+    const { findByLabelText, findByTestId } = await renderScreen({ routineId: 'r-9' });
+    await findByLabelText('routine-name-input');
+
+    mergedSetOptions().onMenuPress();
+
+    fireEvent.press(await findByTestId('routine-menu-archive'));
 
     await Promise.resolve();
     await Promise.resolve();
 
     expect(mockArchiveRoutine).toHaveBeenCalledWith(null, 'r-9');
     expect(capturedNavigation.goBack).toHaveBeenCalled();
+  });
+
+  it('edit mode does not render the footer Archive button', async () => {
+    mockListDrills.mockResolvedValue([makeDrill({ id: 'd-a', name: 'Wall rally' })]);
+    mockGetRoutine.mockResolvedValue({
+      routine: makeRoutine({ id: 'r-1', name: 'Existing' }),
+      items: [makeRoutineItem({ id: 'ri-1', drillId: 'd-a', plannedSets: 1, position: 0 })],
+    });
+
+    const { findByLabelText, queryByText } = await renderScreen({ routineId: 'r-1' });
+    await findByLabelText('routine-name-input');
+    // Footer Archive was moved into the Routine menu sheet; nothing archive-ish
+    // remains visible on the screen surface before the sheet is opened.
+    expect(queryByText('Archive routine')).toBeNull();
   });
 
   it('moving an item up reorders the saved items', async () => {

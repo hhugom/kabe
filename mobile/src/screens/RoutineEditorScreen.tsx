@@ -1,8 +1,9 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { AppButton } from '../components/AppButton';
 import { Icon } from '../components/Icon';
+import { RoutineMenuSheet } from '../components/RoutineMenuSheet';
 import { Screen } from '../components/Screen';
 import { getAppDb } from '../db/client';
 import type { RootStackParamList } from '../navigation/types';
@@ -27,6 +28,18 @@ export function RoutineEditorScreen({ navigation, route }: Props) {
   const [items, setItems] = useState<DraftItem[]>([]);
   const [drills, setDrills] = useState<Drill[]>([]);
   const [loaded, setLoaded] = useState(!isEdit);
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  const openMenu = useCallback(() => setMenuOpen(true), []);
+
+  // Edit mode exposes the header three-dot (opens the Routine menu sheet with
+  // the Archive danger row). Create mode has nothing to archive yet, so the
+  // three-dot is suppressed — see docs/conventions/navigation-surface.md
+  // § Header-icon affordance (visibility-when-≥1-action). Custom option key is
+  // read by App.tsx `renderPillHeader` and passed to PillHeader's onMenuPress.
+  useEffect(() => {
+    navigation.setOptions({ onMenuPress: isEdit ? openMenu : undefined } as any);
+  }, [navigation, isEdit, openMenu]);
 
   useEffect(() => {
     const db = getAppDb();
@@ -88,6 +101,12 @@ export function RoutineEditorScreen({ navigation, route }: Props) {
     } else {
       await createRoutine(db, { name, items: payload });
     }
+    navigation.goBack();
+  }
+
+  async function archive() {
+    if (!routineId) return;
+    await archiveRoutine(getAppDb(), routineId);
     navigation.goBack();
   }
 
@@ -184,18 +203,14 @@ export function RoutineEditorScreen({ navigation, route }: Props) {
       </ScrollView>
       <View style={styles.footer}>
         <AppButton title="Save" onPress={save} size="lg" disabled={!canSave} />
-        {isEdit ? (
-          <AppButton
-            title="Archive routine"
-            variant="danger"
-            onPress={async () => {
-              if (!routineId) return;
-              await archiveRoutine(getAppDb(), routineId);
-              navigation.goBack();
-            }}
-          />
-        ) : null}
       </View>
+      {isEdit ? (
+        <RoutineMenuSheet
+          open={menuOpen}
+          onOpenChange={setMenuOpen}
+          onArchive={archive}
+        />
+      ) : null}
     </Screen>
   );
 }
