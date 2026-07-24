@@ -4,4 +4,5 @@ export type RootStackParamList = {
   RoutineEditor: { routineId?: string };
   Drills: undefined;
   ArchetypesDemo: undefined;
+  RowsDemo: undefined;
 };

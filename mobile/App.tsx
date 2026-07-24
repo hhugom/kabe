@@ -24,6 +24,7 @@ import { PickRoutineSheet } from './src/components/PickRoutineSheet';
 import { PillHeader } from './src/components/PillHeader';
 import { TabBar } from './src/components/TabBar';
 import { ArchetypesDemoScreen } from './src/screens/ArchetypesDemoScreen';
+import { RowsDemoScreen } from './src/screens/RowsDemoScreen';
 import { DrillsScreen } from './src/screens/DrillsScreen';
 import { HomeScreen } from './src/screens/HomeScreen';
 import { InSessionScreen } from './src/screens/InSessionScreen';
@@ -184,6 +185,11 @@ export default function App() {
             name="ArchetypesDemo"
             component={ArchetypesDemoScreen}
             options={{ title: 'Screen archetypes' }}
+          />
+          <RootStack.Screen
+            name="RowsDemo"
+            component={RowsDemoScreen}
+            options={{ title: 'Row primitive' }}
           />
         </RootStack.Navigator>
         <StatusBar style="auto" />
