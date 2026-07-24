@@ -394,14 +394,12 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
         borderTopWidth={1}
         borderTopColor={colors.surfaceHi}
         backgroundColor={colors.surface}
-        gap={spacing.sm}
       >
         <AppButton
           title="Add a drill"
           onPress={() => setAddDrillOpen(true)}
           size="lg"
         />
-        <AppButton title="End Session" onPress={onEnd} variant="danger" size="lg" />
       </YStack>
 
       <AddADrillSheet

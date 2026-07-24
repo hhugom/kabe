@@ -327,6 +327,17 @@ describe('InSessionScreen — timer, wake-lock, and navigation', () => {
     }
   });
 
+  it('picker branch renders no footer End Session button (end lives in the sheet)', async () => {
+    mockListDrills.mockResolvedValue([]);
+
+    const { findByText, queryByText } = await renderScreen();
+    // Wait for the picker to hydrate.
+    await findByText('What are you working on?');
+    // The only "End Session" affordance now lives inside the Session menu sheet,
+    // which starts closed — so no such text should be present on the picker itself.
+    expect(queryByText('End Session')).toBeNull();
+  });
+
   it('pressing the header three-dot on the picker branch opens the Session menu sheet', async () => {
     mockListDrills.mockResolvedValue([]);
 
