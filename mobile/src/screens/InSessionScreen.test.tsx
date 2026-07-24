@@ -341,15 +341,15 @@ describe('InSessionScreen — timer, wake-lock, and navigation', () => {
     expect(await findByTestId('session-menu-end-session')).toBeTruthy();
   });
 
-  it('End Session calls endSession and navigates back', async () => {
+  it('tapping End Session in the Session menu sheet ends the session and navigates back', async () => {
     mockListDrills.mockResolvedValue([]);
 
-    const { findByText } = await renderScreen();
+    const { findByText, findByTestId } = await renderScreen();
+    await findByText('What are you working on?');
 
-    const btn = await findByText('End Session');
-    await act(async () => {
-      fireEvent.press(btn);
-    });
+    await pressHeaderMenu();
+    fireEvent.press(await findByTestId('session-menu-end-session'));
+    await act(async () => {});
 
     expect(mockEndSession).toHaveBeenCalledWith(
       null,
