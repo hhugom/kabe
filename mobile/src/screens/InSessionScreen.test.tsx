@@ -28,6 +28,35 @@ jest.mock('expo-keep-awake', () => ({
   deactivateKeepAwake: jest.fn(),
 }));
 
+// Stand in for the AddADrillSheet — its own contract lives in AddADrillSheet.test.tsx.
+// Here we only care that InSessionScreen wires it up (open state + onPick handler).
+const mockAddADrillSheetProps: any[] = [];
+jest.mock('../components/AddADrillSheet', () => {
+  const React = require('react');
+  const { Pressable, Text } = require('react-native');
+  return {
+    AddADrillSheet: (props: any) => {
+      mockAddADrillSheetProps.push(props);
+      if (!props.open) return null;
+      return React.createElement(
+        React.Fragment,
+        null,
+        (props.drills as Array<{ id: string; name: string }>).map((d) =>
+          React.createElement(
+            Pressable,
+            {
+              key: d.id,
+              testID: `add-a-drill-row-${d.id}`,
+              onPress: () => props.onPick(d),
+            },
+            React.createElement(Text, null, d.name)
+          )
+        )
+      );
+    },
+  };
+});
+
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 const mockActivateKeepAwake = activateKeepAwakeAsync as jest.MockedFunction<
   typeof activateKeepAwakeAsync
@@ -112,6 +141,7 @@ describe('InSessionScreen — timer, wake-lock, and navigation', () => {
     mockGetActiveSession.mockResolvedValue({ session: makeSession(), entries: [] });
     mockLogEntry.mockResolvedValue(makeEntry());
     mockGetRoutine.mockResolvedValue(null);
+    mockAddADrillSheetProps.length = 0;
   });
 
   it('navigates back when no session is active', async () => {
@@ -134,7 +164,8 @@ describe('InSessionScreen — timer, wake-lock, and navigation', () => {
     const clock = () => new Date(t0 + ticks);
 
     const { findByTestId, findByText } = await renderScreen({ clock });
-    fireEvent.press(await findByTestId('pick-drill-dur-1'));
+    fireEvent.press(await findByText('Add a drill'));
+    fireEvent.press(await findByTestId('add-a-drill-row-dur-1'));
 
     fireEvent.press(await findByText('Start'));
     ticks = 600_000;
@@ -159,7 +190,8 @@ describe('InSessionScreen — timer, wake-lock, and navigation', () => {
     const clock = () => new Date(t0 + ticks);
 
     const { findByTestId, findByText } = await renderScreen({ clock });
-    fireEvent.press(await findByTestId('pick-drill-dur-disp'));
+    fireEvent.press(await findByText('Add a drill'));
+    fireEvent.press(await findByTestId('add-a-drill-row-dur-disp'));
 
     fireEvent.press(await findByText('Start'));
     // 3 minutes 7 seconds after Start
@@ -182,7 +214,8 @@ describe('InSessionScreen — timer, wake-lock, and navigation', () => {
     mockListDrills.mockResolvedValue([drill]);
 
     const { findByTestId, findByText, findAllByText } = await renderScreen();
-    fireEvent.press(await findByTestId('pick-drill-dur-t'));
+    fireEvent.press(await findByText('Add a drill'));
+    fireEvent.press(await findByTestId('add-a-drill-row-dur-t'));
 
     // Zwift-HUD layout splits target label and value: a "TARGET" chip labels the 10:00 value.
     expect(await findByText(/target/i)).toBeTruthy();
@@ -194,8 +227,9 @@ describe('InSessionScreen — timer, wake-lock, and navigation', () => {
     const drill = makeDrill({ id: 'dur-nt', name: 'Wall rally', metric: 'duration', target: null });
     mockListDrills.mockResolvedValue([drill]);
 
-    const { findByTestId, queryByText } = await renderScreen();
-    fireEvent.press(await findByTestId('pick-drill-dur-nt'));
+    const { findByTestId, findByText, queryByText } = await renderScreen();
+    fireEvent.press(await findByText('Add a drill'));
+    fireEvent.press(await findByTestId('add-a-drill-row-dur-nt'));
 
     expect(queryByText(/target/i)).toBeNull();
   });
@@ -208,7 +242,8 @@ describe('InSessionScreen — timer, wake-lock, and navigation', () => {
     const clock = () => new Date(Date.parse(NOW) + ticks);
 
     const { findByTestId, findByText } = await renderScreen({ clock });
-    fireEvent.press(await findByTestId('pick-drill-dur-k'));
+    fireEvent.press(await findByText('Add a drill'));
+    fireEvent.press(await findByTestId('add-a-drill-row-dur-k'));
 
     expect(mockActivateKeepAwake).not.toHaveBeenCalled();
 
@@ -239,7 +274,8 @@ describe('InSessionScreen — timer, wake-lock, and navigation', () => {
 
     try {
       const { findByTestId, findByText } = await renderScreen({ clock });
-      fireEvent.press(await findByTestId('pick-drill-dur-fg'));
+      fireEvent.press(await findByText('Add a drill'));
+      fireEvent.press(await findByTestId('add-a-drill-row-dur-fg'));
       fireEvent.press(await findByText('Start'));
 
       // Simulate the OS pausing JS while the app is backgrounded — clock jumps 30s.
@@ -259,8 +295,10 @@ describe('InSessionScreen — timer, wake-lock, and navigation', () => {
 
     const { findByText } = await renderScreen();
 
-    fireEvent.press(await findByText('End Session'));
-    await act(async () => {});
+    const btn = await findByText('End Session');
+    await act(async () => {
+      fireEvent.press(btn);
+    });
 
     expect(mockEndSession).toHaveBeenCalledWith(
       null,
@@ -268,5 +306,58 @@ describe('InSessionScreen — timer, wake-lock, and navigation', () => {
       expect.anything()
     );
     expect(currentNavigation!.goBack).toHaveBeenCalled();
+  });
+
+  it('"Add a drill" CTA opens the AddADrillSheet with every library drill', async () => {
+    const drillA = makeDrill({ id: 'w1', name: 'Wall rally', category: 'wall' });
+    const drillB = makeDrill({ id: 's1', name: 'Slice serve', category: 'service' });
+    mockListDrills.mockResolvedValue([drillA, drillB]);
+
+    const { findByText, findByTestId } = await renderScreen();
+
+    // findByText waits for hydration; after it resolves the sheet has been
+    // rendered at least once with `open: false`.
+    fireEvent.press(await findByText('Add a drill'));
+
+    // findByTestId polls until the mock re-renders with `open: true` and
+    // emits the row for our drill.
+    expect(await findByTestId('add-a-drill-row-w1')).toBeTruthy();
+
+    const props = mockAddADrillSheetProps[mockAddADrillSheetProps.length - 1];
+    expect(props.open).toBe(true);
+    expect(props.drills.map((d: { id: string }) => d.id).sort()).toEqual(['s1', 'w1']);
+  });
+
+  it('picking a drill from the sheet enters that drill\'s entry mode and closes the sheet', async () => {
+    // AC: "Selecting a drill creates an ad-hoc DrillEntry on the active session
+    //      and navigates to the drill's entry mode".
+    // The entry mode is a distinct rendered UI within InSessionScreen (per
+    // docs/conventions/primary-vs-annex.md § The unit: mode-screen). Landing on
+    // reps input for the picked drill means we've navigated to it.
+    const drill = makeDrill({ id: 'w1', name: 'Wall rally', category: 'wall', metric: 'reps' });
+    mockListDrills.mockResolvedValue([drill]);
+
+    const { findByText, findByTestId, findByLabelText, queryByText } = await renderScreen();
+
+    fireEvent.press(await findByText('Add a drill'));
+    fireEvent.press(await findByTestId('add-a-drill-row-w1'));
+
+    // Entry mode surface for the picked drill is now visible (reps input mode)…
+    expect(await findByLabelText('reps-input')).toBeTruthy();
+    // …and the picker CTA is gone — entry mode replaces the picker (per
+    // docs/conventions/primary-vs-annex.md § The unit: mode-screen).
+    expect(queryByText('Add a drill')).toBeNull();
+  });
+
+  it('does not render the old inline drill picker on the picker mode-screen', async () => {
+    // Per ticket #20: "Old inline add path removed from the picker". The
+    // library-of-drills grid used to sit inline; it now lives inside the sheet.
+    const drill = makeDrill({ id: 'w1', name: 'Wall rally', category: 'wall' });
+    mockListDrills.mockResolvedValue([drill]);
+
+    const { queryByTestId } = await renderScreen();
+    await act(async () => {});
+
+    expect(queryByTestId('pick-drill-w1')).toBeNull();
   });
 });
