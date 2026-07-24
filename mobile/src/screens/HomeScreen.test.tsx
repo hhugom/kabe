@@ -22,4 +22,12 @@ describe('HomeScreen', () => {
     const { getByText } = await render(<HomeScreen />);
     expect(getByText('No recent practice yet')).toBeTruthy();
   });
+
+  it('does not render a Start Session or Start-from-Routine CTA', async () => {
+    // Per docs/conventions/primary-vs-annex.md (updated by #8): Start-a-Session moved off Home
+    // to the tab-bar center button. Home is a dashboard surface, no session-launch CTAs.
+    const { queryByText } = await render(<HomeScreen />);
+    expect(queryByText('Start Session')).toBeNull();
+    expect(queryByText('Start from Routine')).toBeNull();
+  });
 });
