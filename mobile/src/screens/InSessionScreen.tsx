@@ -1,10 +1,12 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
-import { useCallback, useEffect, useState } from 'react';
+import { type ReactNode, useCallback, useEffect, useState } from 'react';
 import { AppState, FlatList, Pressable, TextInput } from 'react-native';
 import { Text, View, XStack, YStack } from 'tamagui';
 import { AppButton } from '../components/AppButton';
+import { PillHeader } from '../components/PillHeader';
 import { Screen } from '../components/Screen';
+import { SessionMenuSheet } from '../components/SessionMenuSheet';
 import { getAppDb } from '../db/client';
 import type { RootStackParamList } from '../navigation/types';
 import { colors, radius, spacing, typography } from '../theme';
@@ -55,6 +57,7 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
   const [loaded, setLoaded] = useState(false);
   const [timerStartedAt, setTimerStartedAt] = useState<Date | null>(null);
   const [, setTick] = useState(0);
+  const [sessionMenuOpen, setSessionMenuOpen] = useState(false);
 
   useEffect(() => {
     if (!timerStartedAt) return;
@@ -119,7 +122,32 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
     navigation.goBack();
   }
 
-  if (!loaded || !state) return <Screen />;
+  // Every InSession mode-screen wears the same shell: a stack-push header with
+  // three-dot menu (see docs/conventions/navigation-surface.md § Header-icon
+  // affordance) plus the Session menu sheet the three-dot opens (see
+  // docs/conventions/primary-vs-annex.md § InSession-picker). Rendered here (not
+  // via the RN header) so the menu-press wires directly to in-screen sheet state.
+  function withShell(content: ReactNode) {
+    return (
+      <>
+        <PillHeader
+          title="Session"
+          onBack={() => navigation.goBack()}
+          sessionActive={false}
+          onResumePress={() => {}}
+          onMenuPress={() => setSessionMenuOpen(true)}
+        />
+        {content}
+        <SessionMenuSheet
+          open={sessionMenuOpen}
+          onOpenChange={setSessionMenuOpen}
+          onEndSession={onEnd}
+        />
+      </>
+    );
+  }
+
+  if (!loaded || !state) return withShell(<Screen edges={['left', 'right', 'bottom']} />);
 
   const { pickedDrill, draft } = state;
 
@@ -132,8 +160,8 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
     const stateAccent = target != null ? stateAccentFor(pct) : colors.accent;
     const pctInt = target != null ? Math.round(Math.min(1, pct) * 100) : 0;
 
-    return (
-      <Screen edges={['top', 'left', 'right', 'bottom']}>
+    return withShell(
+      <Screen edges={['left', 'right', 'bottom']}>
         <EntryHeader drill={pickedDrill} stateAccent={stateAccent} inPlay={!!timerStartedAt} />
 
         <YStack
@@ -202,8 +230,8 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
   }
 
   if (pickedDrill?.metric === 'accuracy' && draft?.kind === 'accuracy') {
-    return (
-      <Screen edges={['top', 'left', 'right', 'bottom']}>
+    return withShell(
+      <Screen edges={['left', 'right', 'bottom']}>
         <EntryHeader drill={pickedDrill} />
         <XStack alignItems="flex-end" gap={spacing.sm} marginTop={spacing.xl}>
           <NumberField
@@ -231,8 +259,8 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
   }
 
   if (pickedDrill && draft?.kind === 'reps') {
-    return (
-      <Screen edges={['top', 'left', 'right', 'bottom']}>
+    return withShell(
+      <Screen edges={['left', 'right', 'bottom']}>
         <EntryHeader drill={pickedDrill} />
         <YStack alignItems="center" marginTop={spacing.xl}>
           <NumberField
@@ -253,8 +281,8 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
 
   const planned = visiblePlannedItems(state);
 
-  return (
-    <Screen padded={false} edges={['top', 'left', 'right', 'bottom']}>
+  return withShell(
+    <Screen padded={false} edges={['left', 'right', 'bottom']}>
       <YStack paddingHorizontal={spacing.lg} paddingTop={spacing.lg} paddingBottom={spacing.md}>
         <Text style={[typography.label, { color: colors.accent }]}>IN SESSION</Text>
         <Text style={[typography.title, { marginTop: spacing.xs }]}>What are you working on?</Text>
@@ -410,16 +438,6 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
             </Pressable>
           )}
         />
-      </YStack>
-
-      <YStack
-        paddingHorizontal={spacing.lg}
-        paddingVertical={spacing.md}
-        borderTopWidth={1}
-        borderTopColor={colors.surfaceHi}
-        backgroundColor={colors.surface}
-      >
-        <AppButton title="End Session" onPress={onEnd} variant="danger" size="lg" />
       </YStack>
     </Screen>
   );

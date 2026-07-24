@@ -179,7 +179,9 @@ export default function App() {
           <RootStack.Screen
             name="InSession"
             component={InSessionScreen}
-            options={{ title: 'Session', header: renderPillHeader }}
+            // InSession renders its own PillHeader inside the screen JSX so the
+            // three-dot menu can dispatch to sheet state that lives in-screen.
+            options={{ title: 'Session', headerShown: false }}
           />
           <RootStack.Screen
             name="ArchetypesDemo"

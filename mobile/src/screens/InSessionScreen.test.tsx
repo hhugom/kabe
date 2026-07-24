@@ -28,6 +28,19 @@ jest.mock('expo-keep-awake', () => ({
   deactivateKeepAwake: jest.fn(),
 }));
 
+// Tamagui Sheet is Tamagui's concern (proven in SheetLayout tests). Here we
+// mock it out so the Session menu sheet's children render inline when open.
+jest.mock('tamagui', () => {
+  const actual = jest.requireActual('tamagui');
+  function MockSheet(props: any) {
+    return props.open ? props.children : null;
+  }
+  MockSheet.Overlay = (_: any) => null;
+  MockSheet.Handle = (_: any) => null;
+  MockSheet.Frame = ({ children }: any) => children;
+  return { ...actual, Sheet: MockSheet };
+});
+
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 const mockActivateKeepAwake = activateKeepAwakeAsync as jest.MockedFunction<
   typeof activateKeepAwakeAsync
@@ -106,6 +119,7 @@ describe('InSessionScreen — timer, wake-lock, and navigation', () => {
     mockLogEntry.mockReset();
     mockGetRoutine.mockReset();
     mockEndSession.mockReset();
+    mockEndSession.mockResolvedValue(undefined as any);
     mockActivateKeepAwake.mockReset();
     mockActivateKeepAwake.mockResolvedValue(undefined);
     mockDeactivateKeepAwake.mockReset();
@@ -254,10 +268,43 @@ describe('InSessionScreen — timer, wake-lock, and navigation', () => {
     }
   });
 
-  it('End Session calls endSession and navigates back', async () => {
+  it('does not render an End Session button in the footer', async () => {
+    // End Session moved off the InSession footer into the Session menu sheet.
+    // The primary surface (picker mode) must show no End Session affordance.
+    mockListDrills.mockResolvedValue([
+      makeDrill({ id: 'd-1', name: 'Wall rally' }),
+    ]);
+
+    const { findByTestId, queryByText } = await renderScreen();
+    // Wait for hydration so the picker mode is fully rendered.
+    await findByTestId('pick-drill-d-1');
+
+    expect(queryByText('End Session')).toBeNull();
+  });
+
+  it('opens the Session menu sheet when the header three-dot is pressed', async () => {
+    // primary-vs-annex.md § InSession-picker + navigation-surface.md § Header-icon
+    // affordance: End Session is disposed to a bottom-sheet Session menu opened
+    // by the three-dot on the header, available on every InSession mode.
     mockListDrills.mockResolvedValue([]);
 
-    const { findByText } = await renderScreen();
+    const { findByTestId, findByText, queryByText } = await renderScreen();
+    // Wait for hydration so the header three-dot is fully rendered.
+    await findByTestId('pill-header-menu');
+
+    // Sheet is closed initially — the End Session row does not render.
+    expect(queryByText('End Session')).toBeNull();
+
+    fireEvent.press(await findByTestId('pill-header-menu'));
+
+    expect(await findByText('End Session')).toBeTruthy();
+  });
+
+  it('End Session (from Session menu sheet) calls endSession and navigates back', async () => {
+    mockListDrills.mockResolvedValue([]);
+
+    const { findByTestId, findByText } = await renderScreen();
+    fireEvent.press(await findByTestId('pill-header-menu'));
 
     fireEvent.press(await findByText('End Session'));
     await act(async () => {});
