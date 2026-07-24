@@ -107,12 +107,16 @@ export default function App() {
       const nav = navigation as NativeStackNavigationProp<RootStackParamList>;
       // Pill is suppressed on InSession itself — see navigation-surface.md § Active-session pill.
       const showPill = sessionActive && route.name !== 'InSession';
+      // Screens publish a three-dot handler via navigation.setOptions({ onMenuPress }).
+      // React Navigation types `options` as `any`, so we cast to read it.
+      const onMenuPress = (options as any).onMenuPress as (() => void) | undefined;
       return (
         <PillHeader
           title={typeof options.title === 'string' ? options.title : ''}
           onBack={back ? () => nav.goBack() : undefined}
           sessionActive={showPill}
           onResumePress={() => nav.navigate('InSession')}
+          onMenuPress={onMenuPress}
         />
       );
     },
