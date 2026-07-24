@@ -50,6 +50,14 @@ function stateAccentFor(pct: number): string {
   return colors.accent;
 }
 
+// Parses a non-negative integer from a text-input string; returns 0 on empty
+// or invalid input so hero-panel percent / progress computations don't NaN.
+function parseNonNegIntSafe(s: string): number {
+  if (!/^\d+$/.test(s)) return 0;
+  const n = Number(s);
+  return Number.isInteger(n) && n >= 0 ? n : 0;
+}
+
 export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
   const [state, setState] = useState<ActiveSessionState | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -202,28 +210,67 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
   }
 
   if (pickedDrill?.metric === 'accuracy' && draft?.kind === 'accuracy') {
+    const target = pickedDrill.target;
+    const successes = parseNonNegIntSafe(draft.value);
+    const attempted = parseNonNegIntSafe(draft.attempted);
+    const accuracyPct = attempted > 0 ? successes / attempted : 0;
+    const stateAccent = target != null ? stateAccentFor(accuracyPct) : colors.accent;
+    const pctInt = target != null ? Math.round(Math.min(1, accuracyPct) * 100) : 0;
+
     return (
       <Screen edges={['top', 'left', 'right', 'bottom']}>
-        <EntryHeader drill={pickedDrill} />
-        <XStack alignItems="flex-end" gap={spacing.sm} marginTop={spacing.xl}>
-          <NumberField
-            label="SUCCESSES"
-            value={draft.value}
-            onChangeText={(s) => setState((st) => (st ? updateDraftValue(st, s) : st))}
-            accessibilityLabel="accuracy-value-input"
-          />
-          <View height={78} justifyContent="center">
-            <Text style={[typography.title, { color: colors.textMuted }]}>/</Text>
-          </View>
-          <NumberField
-            label="ATTEMPTED"
-            value={draft.attempted}
-            onChangeText={(s) => setState((st) => (st ? updateDraftAttempted(st, s) : st))}
-            accessibilityLabel="accuracy-attempted-input"
-          />
-        </XStack>
+        <EntryHeader drill={pickedDrill} stateAccent={target != null ? stateAccent : undefined} />
+        <YStack
+          testID="entry-hero-panel"
+          backgroundColor={colors.surface}
+          borderColor={colors.surfaceHi}
+          borderWidth={1}
+          borderRadius={radius.lg}
+          padding={spacing.xl}
+          alignItems="center"
+          marginTop={spacing.md}
+        >
+          <Text
+            testID="accuracy-hero-readout"
+            style={[typography.heroDigits, { color: stateAccent }]}
+          >
+            {pctInt}%
+          </Text>
+          <XStack alignItems="flex-end" gap={spacing.sm} marginTop={spacing.lg}>
+            <NumberField
+              label="SUCCESSES"
+              value={draft.value}
+              onChangeText={(s) => setState((st) => (st ? updateDraftValue(st, s) : st))}
+              accessibilityLabel="accuracy-value-input"
+            />
+            <View height={78} justifyContent="center">
+              <Text style={[typography.title, { color: colors.textMuted }]}>/</Text>
+            </View>
+            <NumberField
+              label="ATTEMPTED"
+              value={draft.attempted}
+              onChangeText={(s) => setState((st) => (st ? updateDraftAttempted(st, s) : st))}
+              accessibilityLabel="accuracy-attempted-input"
+            />
+          </XStack>
+          {target != null ? <ProgressTrack pctInt={pctInt} accent={stateAccent} /> : null}
+        </YStack>
+
+        {target != null ? (
+          <XStack gap={spacing.md} marginTop={spacing.md}>
+            <StatChip label="TARGET" value={String(target)} />
+            <StatChip label="REMAINING" value={String(Math.max(0, target - attempted))} />
+          </XStack>
+        ) : null}
+
         <YStack gap={spacing.md} marginTop="auto">
-          <AppButton title="Save" onPress={onSaveEntry} size="lg" disabled={!canSaveDraft(state)} />
+          <AppButton
+            title="Save"
+            onPress={onSaveEntry}
+            size="lg"
+            disabled={!canSaveDraft(state)}
+            style={{ backgroundColor: stateAccent }}
+          />
           <AppButton title="Cancel" onPress={onCancelEntry} variant="ghost" size="lg" />
         </YStack>
       </Screen>
@@ -231,20 +278,50 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
   }
 
   if (pickedDrill && draft?.kind === 'reps') {
+    const target = pickedDrill.target;
+    const numericValue = parseNonNegIntSafe(draft.value);
+    const pct = target != null && target > 0 ? Math.min(1.2, numericValue / target) : 0;
+    const stateAccent = target != null ? stateAccentFor(pct) : colors.accent;
+    const pctInt = target != null ? Math.round(Math.min(1, pct) * 100) : 0;
+
     return (
       <Screen edges={['top', 'left', 'right', 'bottom']}>
-        <EntryHeader drill={pickedDrill} />
-        <YStack alignItems="center" marginTop={spacing.xl}>
-          <NumberField
-            label="REPS"
+        <EntryHeader drill={pickedDrill} stateAccent={target != null ? stateAccent : undefined} />
+        <YStack
+          testID="entry-hero-panel"
+          backgroundColor={colors.surface}
+          borderColor={colors.surfaceHi}
+          borderWidth={1}
+          borderRadius={radius.lg}
+          padding={spacing.xl}
+          alignItems="center"
+          marginTop={spacing.md}
+        >
+          <HeroNumberInput
             value={draft.value}
             onChangeText={(s) => setState((st) => (st ? updateDraftValue(st, s) : st))}
             accessibilityLabel="reps-input"
-            wide
+            testID="reps-hero-readout"
+            color={stateAccent}
           />
+          {target != null ? <ProgressTrack pctInt={pctInt} accent={stateAccent} /> : null}
         </YStack>
+
+        {target != null ? (
+          <XStack gap={spacing.md} marginTop={spacing.md}>
+            <StatChip label="TARGET" value={String(target)} />
+            <StatChip label="REMAINING" value={String(Math.max(0, target - numericValue))} />
+          </XStack>
+        ) : null}
+
         <YStack gap={spacing.md} marginTop="auto">
-          <AppButton title="Save" onPress={onSaveEntry} size="lg" disabled={!canSaveDraft(state)} />
+          <AppButton
+            title="Save"
+            onPress={onSaveEntry}
+            size="lg"
+            disabled={!canSaveDraft(state)}
+            style={{ backgroundColor: stateAccent }}
+          />
           <AppButton title="Cancel" onPress={onCancelEntry} variant="ghost" size="lg" />
         </YStack>
       </Screen>
@@ -522,5 +599,62 @@ function NumberField({
         }}
       />
     </YStack>
+  );
+}
+
+// 10 dp `surfaceHi` track with a fill in the current state accent, per
+// docs/conventions/aesthetic-direction.md § HUD conventions. `pctInt` is 0–100.
+function ProgressTrack({ pctInt, accent }: { pctInt: number; accent: string }) {
+  return (
+    <View
+      testID="entry-progress-track"
+      height={10}
+      width="100%"
+      borderRadius={radius.pill}
+      backgroundColor={colors.surfaceHi}
+      overflow="hidden"
+      marginTop={spacing.lg}
+    >
+      <View
+        testID="entry-progress-fill"
+        height="100%"
+        width={`${pctInt}%`}
+        backgroundColor={accent}
+        borderRadius={radius.pill}
+      />
+    </View>
+  );
+}
+
+// HUD-tier numeric input using typography.heroDigits (112 sp / 800) per
+// docs/conventions/aesthetic-direction.md § HUD conventions. The color is
+// driven by the caller so the entry-mode's state-driven accent flows through.
+function HeroNumberInput({
+  value,
+  onChangeText,
+  accessibilityLabel,
+  testID,
+  color,
+}: {
+  value: string;
+  onChangeText: (s: string) => void;
+  accessibilityLabel: string;
+  testID: string;
+  color: string;
+}) {
+  return (
+    <TextInput
+      value={value}
+      onChangeText={onChangeText}
+      keyboardType="number-pad"
+      accessibilityLabel={accessibilityLabel}
+      placeholder="0"
+      placeholderTextColor={colors.textMuted}
+      testID={testID}
+      style={[
+        typography.heroDigits,
+        { color, padding: 0, textAlign: 'center' },
+      ]}
+    />
   );
 }

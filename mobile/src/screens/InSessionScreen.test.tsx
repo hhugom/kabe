@@ -99,20 +99,21 @@ async function renderScreen(opts: { clock?: () => Date } = {}) {
   );
 }
 
+beforeEach(() => {
+  mockListDrills.mockReset();
+  mockGetActiveSession.mockReset();
+  mockLogEntry.mockReset();
+  mockGetRoutine.mockReset();
+  mockEndSession.mockReset();
+  mockActivateKeepAwake.mockReset();
+  mockActivateKeepAwake.mockResolvedValue(undefined);
+  mockDeactivateKeepAwake.mockReset();
+  mockGetActiveSession.mockResolvedValue({ session: makeSession(), entries: [] });
+  mockLogEntry.mockResolvedValue(makeEntry());
+  mockGetRoutine.mockResolvedValue(null);
+});
+
 describe('InSessionScreen — timer, wake-lock, and navigation', () => {
-  beforeEach(() => {
-    mockListDrills.mockReset();
-    mockGetActiveSession.mockReset();
-    mockLogEntry.mockReset();
-    mockGetRoutine.mockReset();
-    mockEndSession.mockReset();
-    mockActivateKeepAwake.mockReset();
-    mockActivateKeepAwake.mockResolvedValue(undefined);
-    mockDeactivateKeepAwake.mockReset();
-    mockGetActiveSession.mockResolvedValue({ session: makeSession(), entries: [] });
-    mockLogEntry.mockResolvedValue(makeEntry());
-    mockGetRoutine.mockResolvedValue(null);
-  });
 
   it('navigates back when no session is active', async () => {
     mockGetActiveSession.mockResolvedValue(null);
@@ -124,6 +125,7 @@ describe('InSessionScreen — timer, wake-lock, and navigation', () => {
 
     expect(currentNavigation!.goBack).toHaveBeenCalled();
   });
+
 
   it('duration Start → Stop persists elapsed seconds via logEntry', async () => {
     const drill = makeDrill({ id: 'dur-1', name: 'Wall rally', metric: 'duration' });
@@ -270,3 +272,4 @@ describe('InSessionScreen — timer, wake-lock, and navigation', () => {
     expect(currentNavigation!.goBack).toHaveBeenCalled();
   });
 });
+
