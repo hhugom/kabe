@@ -1,8 +1,9 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { useCallback, useEffect, useState } from 'react';
-import { AppState, FlatList, Pressable, TextInput } from 'react-native';
+import { AppState, Pressable, ScrollView, TextInput } from 'react-native';
 import { Text, View, XStack, YStack } from 'tamagui';
+import { AddADrillSheet } from '../components/AddADrillSheet';
 import { AppButton } from '../components/AppButton';
 import { Screen } from '../components/Screen';
 import { getAppDb } from '../db/client';
@@ -54,6 +55,7 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
   const [state, setState] = useState<ActiveSessionState | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [timerStartedAt, setTimerStartedAt] = useState<Date | null>(null);
+  const [addDrillOpen, setAddDrillOpen] = useState(false);
   const [, setTick] = useState(0);
 
   useEffect(() => {
@@ -261,155 +263,110 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
       </YStack>
 
       <YStack flex={1}>
-        <FlatList
-          data={state.drills}
-          keyExtractor={(d) => d.id}
-          contentContainerStyle={{ paddingHorizontal: spacing.lg, paddingBottom: spacing.lg }}
-          ItemSeparatorComponent={() => <View height={spacing.sm} />}
-          ListHeaderComponent={
-            <>
-              {planned.length > 0 ? (
-                <YStack marginBottom={spacing.md} gap={spacing.sm}>
-                  <SectionLabel text="PLANNED" />
-                  {planned.map((item) => {
-                    const drill = state.drills.find((d) => d.id === item.drillId);
-                    const logged = loggedCountForDrill(state, item.drillId);
-                    const badge =
-                      item.plannedSets != null
-                        ? `${logged} / ${item.plannedSets}`
-                        : `logged: ${logged}`;
-                    return (
-                      <Pressable
-                        key={item.id}
-                        testID={`planned-item-${item.id}`}
-                        onPress={() => drill && onPickDrill(drill.id)}
-                        style={({ pressed }) => [
-                          {
-                            flexDirection: 'row',
-                            alignItems: 'center',
-                            backgroundColor: colors.surface,
-                            borderRadius: radius.md,
-                            borderWidth: 1,
-                            borderColor: colors.surfaceHi,
-                            padding: spacing.lg,
-                          },
-                          pressed ? { backgroundColor: colors.surfaceHi } : null,
-                        ]}
-                      >
-                        <YStack flex={1}>
-                          <Text style={typography.title}>{drill?.name ?? 'Drill'}</Text>
-                        </YStack>
-                        <View
-                          backgroundColor={colors.surfaceHi}
-                          paddingHorizontal={spacing.sm}
-                          paddingVertical={2}
-                          borderRadius={radius.pill}
-                        >
-                          <Text style={[typography.caption, { color: colors.accent, fontWeight: '700' }]}>
-                            {badge}
-                          </Text>
-                        </View>
-                        <Pressable
-                          testID={`skip-${item.id}`}
-                          onPress={() =>
-                            setState((s) => (s ? skipPlannedItem(s, item.id) : s))
-                          }
-                          style={{
-                            minHeight: 56,
-                            minWidth: 56,
-                            paddingHorizontal: spacing.md,
-                            marginLeft: spacing.sm,
-                            alignItems: 'center',
-                            justifyContent: 'center',
-                          }}
-                        >
-                          <Text style={[typography.label, { color: colors.textSecondary }]}>
-                            Skip
-                          </Text>
-                        </Pressable>
-                      </Pressable>
-                    );
-                  })}
-                </YStack>
-              ) : null}
-              <SectionLabel text="PICK A DRILL" />
-            </>
-          }
-          ListFooterComponent={
-            state.entries.length > 0 ? (
-              <YStack marginTop={spacing.lg}>
-                <SectionLabel text="LOGGED SO FAR" />
-                {state.entries.map((e) => {
-                  const drill = state.drills.find((d) => d.id === e.drillId);
-                  return (
-                    <XStack
-                      key={e.id}
-                      alignItems="center"
-                      justifyContent="space-between"
-                      paddingVertical={spacing.sm}
-                      borderBottomWidth={1}
-                      borderBottomColor={colors.surfaceHi}
+        <ScrollView
+          contentContainerStyle={{
+            paddingHorizontal: spacing.lg,
+            paddingBottom: spacing.lg,
+          }}
+        >
+          {planned.length > 0 ? (
+            <YStack marginBottom={spacing.md} gap={spacing.sm}>
+              <SectionLabel text="PLANNED" />
+              {planned.map((item) => {
+                const drill = state.drills.find((d) => d.id === item.drillId);
+                const logged = loggedCountForDrill(state, item.drillId);
+                const badge =
+                  item.plannedSets != null
+                    ? `${logged} / ${item.plannedSets}`
+                    : `logged: ${logged}`;
+                return (
+                  <Pressable
+                    key={item.id}
+                    testID={`planned-item-${item.id}`}
+                    onPress={() => drill && onPickDrill(drill.id)}
+                    style={({ pressed }) => [
+                      {
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        backgroundColor: colors.surface,
+                        borderRadius: radius.md,
+                        borderWidth: 1,
+                        borderColor: colors.surfaceHi,
+                        padding: spacing.lg,
+                      },
+                      pressed ? { backgroundColor: colors.surfaceHi } : null,
+                    ]}
+                  >
+                    <YStack flex={1}>
+                      <Text style={typography.title}>{drill?.name ?? 'Drill'}</Text>
+                    </YStack>
+                    <View
+                      backgroundColor={colors.surfaceHi}
+                      paddingHorizontal={spacing.sm}
+                      paddingVertical={2}
+                      borderRadius={radius.pill}
                     >
-                      <Text style={[typography.body, { flex: 1 }]}>{drill?.name ?? 'Drill'}</Text>
-                      <Text
-                        style={[
-                          typography.body,
-                          { color: colors.textSecondary, fontVariant: ['tabular-nums'] },
-                        ]}
-                      >
-                        {drill?.metric === 'accuracy'
-                          ? `${e.value} / ${e.attempted ?? '?'}`
-                          : drill?.metric === 'duration'
-                          ? formatMmSs(e.value)
-                          : `${e.value} ${unitForMetric(drill?.metric ?? 'reps')}`}
+                      <Text style={[typography.caption, { color: colors.accent, fontWeight: '700' }]}>
+                        {badge}
                       </Text>
-                    </XStack>
-                  );
-                })}
-              </YStack>
-            ) : null
-          }
-          renderItem={({ item }) => (
-            <Pressable
-              onPress={() => onPickDrill(item.id)}
-              testID={`pick-drill-${item.id}`}
-              style={({ pressed }) => [
-                {
-                  flexDirection: 'row',
-                  alignItems: 'center',
-                  backgroundColor: colors.surface,
-                  borderRadius: radius.md,
-                  borderWidth: 1,
-                  borderColor: colors.surfaceHi,
-                  padding: spacing.lg,
-                },
-                pressed ? { backgroundColor: colors.surfaceHi } : null,
-              ]}
-            >
-              <YStack flex={1}>
-                <Text style={typography.title}>{item.name}</Text>
-                <Text
-                  style={[
-                    typography.bodyMuted,
-                    { textTransform: 'capitalize', marginTop: 2 },
-                  ]}
-                >
-                  {item.category}
-                </Text>
-              </YStack>
-              <View
-                backgroundColor={colors.surfaceHi}
-                paddingHorizontal={spacing.sm}
-                paddingVertical={2}
-                borderRadius={radius.pill}
-              >
-                <Text style={[typography.caption, { color: colors.accent, fontWeight: '700' }]}>
-                  {item.metric}
-                </Text>
-              </View>
-            </Pressable>
-          )}
-        />
+                    </View>
+                    <Pressable
+                      testID={`skip-${item.id}`}
+                      onPress={() =>
+                        setState((s) => (s ? skipPlannedItem(s, item.id) : s))
+                      }
+                      style={{
+                        minHeight: 56,
+                        minWidth: 56,
+                        paddingHorizontal: spacing.md,
+                        marginLeft: spacing.sm,
+                        alignItems: 'center',
+                        justifyContent: 'center',
+                      }}
+                    >
+                      <Text style={[typography.label, { color: colors.textSecondary }]}>
+                        Skip
+                      </Text>
+                    </Pressable>
+                  </Pressable>
+                );
+              })}
+            </YStack>
+          ) : null}
+
+          {state.entries.length > 0 ? (
+            <YStack marginTop={spacing.md}>
+              <SectionLabel text="LOGGED SO FAR" />
+              {state.entries.map((e) => {
+                const drill = state.drills.find((d) => d.id === e.drillId);
+                return (
+                  <XStack
+                    key={e.id}
+                    alignItems="center"
+                    justifyContent="space-between"
+                    paddingVertical={spacing.sm}
+                    borderBottomWidth={1}
+                    borderBottomColor={colors.surfaceHi}
+                  >
+                    <Text style={[typography.body, { flex: 1 }]}>{drill?.name ?? 'Drill'}</Text>
+                    <Text
+                      style={[
+                        typography.body,
+                        { color: colors.textSecondary, fontVariant: ['tabular-nums'] },
+                      ]}
+                    >
+                      {drill?.metric === 'accuracy'
+                        ? `${e.value} / ${e.attempted ?? '?'}`
+                        : drill?.metric === 'duration'
+                        ? formatMmSs(e.value)
+                        : `${e.value} ${unitForMetric(drill?.metric ?? 'reps')}`}
+                    </Text>
+                  </XStack>
+                );
+              })}
+            </YStack>
+          ) : null}
+        </ScrollView>
       </YStack>
 
       <YStack
@@ -418,9 +375,25 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
         borderTopWidth={1}
         borderTopColor={colors.surfaceHi}
         backgroundColor={colors.surface}
+        gap={spacing.sm}
       >
+        <AppButton
+          title="Add a drill"
+          onPress={() => setAddDrillOpen(true)}
+          size="lg"
+        />
         <AppButton title="End Session" onPress={onEnd} variant="danger" size="lg" />
       </YStack>
+
+      <AddADrillSheet
+        open={addDrillOpen}
+        onOpenChange={setAddDrillOpen}
+        drills={state.drills}
+        onPick={(drill) => {
+          setAddDrillOpen(false);
+          onPickDrill(drill.id);
+        }}
+      />
     </Screen>
   );
 }
