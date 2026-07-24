@@ -15,4 +15,11 @@ describe('HomeScreen', () => {
     const { getByText } = await render(<HomeScreen />);
     expect(getByText('Kabe')).toBeTruthy();
   });
+
+  it('renders an empty-state message for recent practice', async () => {
+    // Per docs/conventions/primary-vs-annex.md (updated by #8): Home's goal is "See recent practice".
+    // With no sessions yet, the primary surface is an empty-state message.
+    const { getByText } = await render(<HomeScreen />);
+    expect(getByText('No recent practice yet')).toBeTruthy();
+  });
 });

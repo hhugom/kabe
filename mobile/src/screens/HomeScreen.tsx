@@ -6,7 +6,7 @@ export function HomeScreen() {
   return (
     <Screen>
       <Text style={styles.hello}>Kabe</Text>
-      <Text style={styles.tagline}>Solo tennis, tracked.</Text>
+      <Text style={styles.tagline}>No recent practice yet</Text>
     </Screen>
   );
 }
