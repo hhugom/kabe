@@ -31,4 +31,13 @@ describe('SessionMenuSheet', () => {
     );
     expect(await findByText('End Session')).toBeTruthy();
   });
+
+  it('fires onEndSession when the End Session row is tapped', async () => {
+    const onEndSession = jest.fn();
+    const { findByText } = await render(
+      wrap(<SessionMenuSheet open onOpenChange={() => {}} onEndSession={onEndSession} />)
+    );
+    fireEvent.press(await findByText('End Session'));
+    expect(onEndSession).toHaveBeenCalledTimes(1);
+  });
 });
