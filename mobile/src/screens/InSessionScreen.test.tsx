@@ -352,6 +352,49 @@ describe('InSessionScreen — timer, wake-lock, and navigation', () => {
     expect(await findByTestId('session-menu-end-session')).toBeTruthy();
   });
 
+  it('reps branch: three-dot opens the Session menu sheet', async () => {
+    const drill = makeDrill({ id: 'reps-m', name: 'Serve reps', metric: 'reps' });
+    mockListDrills.mockResolvedValue([drill]);
+
+    const { findByTestId, findByLabelText, queryByTestId } = await renderScreen();
+    fireEvent.press(await findByTestId('pick-drill-reps-m'));
+    // Reps entry screen surfaces the REPS number field.
+    await findByLabelText('reps-input');
+    expect(queryByTestId('session-menu-end-session')).toBeNull();
+
+    await pressHeaderMenu();
+
+    expect(await findByTestId('session-menu-end-session')).toBeTruthy();
+  });
+
+  it('accuracy branch: three-dot opens the Session menu sheet', async () => {
+    const drill = makeDrill({ id: 'acc-m', name: 'Serve accuracy', metric: 'accuracy' });
+    mockListDrills.mockResolvedValue([drill]);
+
+    const { findByTestId, findByLabelText, queryByTestId } = await renderScreen();
+    fireEvent.press(await findByTestId('pick-drill-acc-m'));
+    await findByLabelText('accuracy-value-input');
+    expect(queryByTestId('session-menu-end-session')).toBeNull();
+
+    await pressHeaderMenu();
+
+    expect(await findByTestId('session-menu-end-session')).toBeTruthy();
+  });
+
+  it('duration branch: three-dot opens the Session menu sheet', async () => {
+    const drill = makeDrill({ id: 'dur-m', name: 'Wall rally', metric: 'duration' });
+    mockListDrills.mockResolvedValue([drill]);
+
+    const { findByTestId, findByText, queryByTestId } = await renderScreen();
+    fireEvent.press(await findByTestId('pick-drill-dur-m'));
+    await findByText('Start');
+    expect(queryByTestId('session-menu-end-session')).toBeNull();
+
+    await pressHeaderMenu();
+
+    expect(await findByTestId('session-menu-end-session')).toBeTruthy();
+  });
+
   it('tapping End Session in the Session menu sheet ends the session and navigates back', async () => {
     mockListDrills.mockResolvedValue([]);
 

@@ -218,6 +218,7 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
           )}
           <AppButton title="Cancel" onPress={onCancelEntry} variant="ghost" size="lg" />
         </YStack>
+        {menuSheet}
       </Screen>
     );
   }
@@ -247,6 +248,7 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
           <AppButton title="Save" onPress={onSaveEntry} size="lg" disabled={!canSaveDraft(state)} />
           <AppButton title="Cancel" onPress={onCancelEntry} variant="ghost" size="lg" />
         </YStack>
+        {menuSheet}
       </Screen>
     );
   }
@@ -268,6 +270,7 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
           <AppButton title="Save" onPress={onSaveEntry} size="lg" disabled={!canSaveDraft(state)} />
           <AppButton title="Cancel" onPress={onCancelEntry} variant="ghost" size="lg" />
         </YStack>
+        {menuSheet}
       </Screen>
     );
   }
