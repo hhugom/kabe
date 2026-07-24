@@ -9,6 +9,19 @@ import type { DrillEntry, Session } from '../use-cases/sessions';
 import { endSession, getActiveSession, logEntry } from '../use-cases/sessions';
 import { InSessionScreen } from './InSessionScreen';
 
+// Tamagui Sheet is proven in SheetLayout tests; here we render children inline
+// when `open` is true so the SessionMenuSheet content becomes queryable.
+jest.mock('tamagui', () => {
+  const actual = jest.requireActual('tamagui');
+  function MockSheet(props: any) {
+    return props.open ? props.children : null;
+  }
+  MockSheet.Overlay = (_: any) => null;
+  MockSheet.Handle = (_: any) => null;
+  MockSheet.Frame = ({ children }: any) => children;
+  return { ...actual, Sheet: MockSheet };
+});
+
 jest.mock('../use-cases/drills', () => ({
   listDrills: jest.fn(),
 }));
@@ -115,17 +128,45 @@ function makeEntry(over: Partial<DrillEntry> = {}): DrillEntry {
   };
 }
 
-let currentNavigation: { goBack: jest.Mock; navigate: jest.Mock } | null = null;
+let currentNavigation: {
+  goBack: jest.Mock;
+  navigate: jest.Mock;
+  setOptions: jest.Mock;
+} | null = null;
+
+// Reads the last `onMenuPress` handler registered via navigation.setOptions.
+// This mirrors what App.tsx#renderPillHeader does with the header's three-dot.
+async function pressHeaderMenu() {
+  if (!currentNavigation) throw new Error('renderScreen not called');
+  for (let i = currentNavigation.setOptions.mock.calls.length - 1; i >= 0; i--) {
+    const opts = currentNavigation.setOptions.mock.calls[i][0];
+    if (opts && typeof opts.onMenuPress === 'function') {
+      await act(async () => {
+        opts.onMenuPress();
+      });
+      return;
+    }
+  }
+  throw new Error('no onMenuPress registered via setOptions');
+}
 
 async function renderScreen(opts: { clock?: () => Date } = {}) {
-  const navigation = { goBack: jest.fn(), navigate: jest.fn() } as any;
+  const navigation = {
+    goBack: jest.fn(),
+    navigate: jest.fn(),
+    setOptions: jest.fn(),
+  } as any;
   currentNavigation = navigation;
   const route = { key: 'k', name: 'InSession' } as any;
-  return render(
-    <TamaguiProvider config={tamaguiConfig} defaultTheme="kabe_dark">
-      <InSessionScreen navigation={navigation} route={route} clock={opts.clock} />
-    </TamaguiProvider>
-  );
+  let result: ReturnType<typeof render>;
+  await act(async () => {
+    result = render(
+      <TamaguiProvider config={tamaguiConfig} defaultTheme="kabe_dark">
+        <InSessionScreen navigation={navigation} route={route} clock={opts.clock} />
+      </TamaguiProvider>
+    );
+  });
+  return result!;
 }
 
 describe('InSessionScreen — timer, wake-lock, and navigation', () => {
@@ -141,6 +182,7 @@ describe('InSessionScreen — timer, wake-lock, and navigation', () => {
     mockGetActiveSession.mockResolvedValue({ session: makeSession(), entries: [] });
     mockLogEntry.mockResolvedValue(makeEntry());
     mockGetRoutine.mockResolvedValue(null);
+    mockEndSession.mockResolvedValue(undefined as any);
     mockAddADrillSheetProps.length = 0;
   });
 
@@ -290,14 +332,90 @@ describe('InSessionScreen — timer, wake-lock, and navigation', () => {
     }
   });
 
-  it('End Session calls endSession and navigates back', async () => {
+  it('picker branch renders no footer End Session button (end lives in the sheet)', async () => {
     mockListDrills.mockResolvedValue([]);
 
-    const { findByText } = await renderScreen();
+    const { findByText, queryByText } = await renderScreen();
+    // Wait for the picker to hydrate.
+    await findByText('What are you working on?');
+    // The only "End Session" affordance now lives inside the Session menu sheet,
+    // which starts closed — so no such text should be present on the picker itself.
+    expect(queryByText('End Session')).toBeNull();
+  });
 
-    const btn = await findByText('End Session');
+  it('pressing the header three-dot on the picker branch opens the Session menu sheet', async () => {
+    mockListDrills.mockResolvedValue([]);
+
+    const { findByText, findByTestId, queryByTestId } = await renderScreen();
+    // The picker renders the "What are you working on?" prompt; assert we're on it,
+    // and that the sheet's End Session row (testID) is not present until the menu opens.
+    await findByText('What are you working on?');
+    expect(queryByTestId('session-menu-end-session')).toBeNull();
+
+    await pressHeaderMenu();
+
+    expect(await findByTestId('session-menu-end-session')).toBeTruthy();
+  });
+
+  it('reps branch: three-dot opens the Session menu sheet', async () => {
+    const drill = makeDrill({ id: 'reps-m', name: 'Serve reps', metric: 'reps' });
+    mockListDrills.mockResolvedValue([drill]);
+
+    const { findByTestId, findByText, findByLabelText, queryByTestId } = await renderScreen();
+    fireEvent.press(await findByText('Add a drill'));
+    fireEvent.press(await findByTestId('add-a-drill-row-reps-m'));
+    // Reps entry screen surfaces the REPS number field.
+    await findByLabelText('reps-input');
+    expect(queryByTestId('session-menu-end-session')).toBeNull();
+
+    await pressHeaderMenu();
+
+    expect(await findByTestId('session-menu-end-session')).toBeTruthy();
+  });
+
+  it('accuracy branch: three-dot opens the Session menu sheet', async () => {
+    const drill = makeDrill({ id: 'acc-m', name: 'Serve accuracy', metric: 'accuracy' });
+    mockListDrills.mockResolvedValue([drill]);
+
+    const { findByTestId, findByText, findByLabelText, queryByTestId } = await renderScreen();
+    fireEvent.press(await findByText('Add a drill'));
+    fireEvent.press(await findByTestId('add-a-drill-row-acc-m'));
+    await findByLabelText('accuracy-value-input');
+    expect(queryByTestId('session-menu-end-session')).toBeNull();
+
+    await pressHeaderMenu();
+
+    expect(await findByTestId('session-menu-end-session')).toBeTruthy();
+  });
+
+  it('duration branch: three-dot opens the Session menu sheet', async () => {
+    const drill = makeDrill({ id: 'dur-m', name: 'Wall rally', metric: 'duration' });
+    mockListDrills.mockResolvedValue([drill]);
+
+    const { findByTestId, findByText, queryByTestId } = await renderScreen();
+    fireEvent.press(await findByText('Add a drill'));
+    fireEvent.press(await findByTestId('add-a-drill-row-dur-m'));
+    await findByText('Start');
+    expect(queryByTestId('session-menu-end-session')).toBeNull();
+
+    await pressHeaderMenu();
+
+    expect(await findByTestId('session-menu-end-session')).toBeTruthy();
+  });
+
+  it('tapping End Session in the Session menu sheet ends the session and navigates back', async () => {
+    mockListDrills.mockResolvedValue([]);
+
+    const { findByText, findByTestId } = await renderScreen();
+    await findByText('What are you working on?');
+
+    await pressHeaderMenu();
     await act(async () => {
-      fireEvent.press(btn);
+      fireEvent.press(await findByTestId('session-menu-end-session'));
+      // onEndSession fires an async `onEnd` chain (endActiveSession → endSession →
+      // navigation.goBack). Wait a tick so the chain settles inside this act scope
+      // — otherwise it resolves during the next test and contaminates it.
+      await new Promise((res) => setImmediate(res));
     });
 
     expect(mockEndSession).toHaveBeenCalledWith(

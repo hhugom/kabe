@@ -6,6 +6,7 @@ import { Text, View, XStack, YStack } from 'tamagui';
 import { AddADrillSheet } from '../components/AddADrillSheet';
 import { AppButton } from '../components/AppButton';
 import { Screen } from '../components/Screen';
+import { SessionMenuSheet } from '../components/SessionMenuSheet';
 import { getAppDb } from '../db/client';
 import type { RootStackParamList } from '../navigation/types';
 import { colors, radius, spacing, typography } from '../theme';
@@ -57,6 +58,13 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
   const [timerStartedAt, setTimerStartedAt] = useState<Date | null>(null);
   const [addDrillOpen, setAddDrillOpen] = useState(false);
   const [, setTick] = useState(0);
+  const [menuOpen, setMenuOpen] = useState(false);
+
+  // Publish the three-dot handler up through navigation options so the shared
+  // PillHeader (rendered by RootStack) can bind it. See App.tsx#renderPillHeader.
+  useEffect(() => {
+    navigation.setOptions({ onMenuPress: () => setMenuOpen(true) } as any);
+  }, [navigation]);
 
   useEffect(() => {
     if (!timerStartedAt) return;
@@ -124,6 +132,17 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
   if (!loaded || !state) return <Screen />;
 
   const { pickedDrill, draft } = state;
+
+  const menuSheet = (
+    <SessionMenuSheet
+      open={menuOpen}
+      onOpenChange={setMenuOpen}
+      onEndSession={() => {
+        setMenuOpen(false);
+        onEnd();
+      }}
+    />
+  );
 
   if (pickedDrill?.metric === 'duration' && draft?.kind === 'duration') {
     const elapsedSeconds = timerStartedAt
@@ -199,6 +218,7 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
           )}
           <AppButton title="Cancel" onPress={onCancelEntry} variant="ghost" size="lg" />
         </YStack>
+        {menuSheet}
       </Screen>
     );
   }
@@ -228,6 +248,7 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
           <AppButton title="Save" onPress={onSaveEntry} size="lg" disabled={!canSaveDraft(state)} />
           <AppButton title="Cancel" onPress={onCancelEntry} variant="ghost" size="lg" />
         </YStack>
+        {menuSheet}
       </Screen>
     );
   }
@@ -249,6 +270,7 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
           <AppButton title="Save" onPress={onSaveEntry} size="lg" disabled={!canSaveDraft(state)} />
           <AppButton title="Cancel" onPress={onCancelEntry} variant="ghost" size="lg" />
         </YStack>
+        {menuSheet}
       </Screen>
     );
   }
@@ -375,14 +397,12 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
         borderTopWidth={1}
         borderTopColor={colors.surfaceHi}
         backgroundColor={colors.surface}
-        gap={spacing.sm}
       >
         <AppButton
           title="Add a drill"
           onPress={() => setAddDrillOpen(true)}
           size="lg"
         />
-        <AppButton title="End Session" onPress={onEnd} variant="danger" size="lg" />
       </YStack>
 
       <AddADrillSheet
@@ -394,6 +414,7 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
           onPickDrill(drill.id);
         }}
       />
+      {menuSheet}
     </Screen>
   );
 }
