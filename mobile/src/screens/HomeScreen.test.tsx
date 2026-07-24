@@ -9,4 +9,10 @@ describe('HomeScreen', () => {
     expect(queryByText('Resume Session')).toBeNull();
     expect(queryByText('Session in progress')).toBeNull();
   });
+
+  it('renders the "Kabe" chrome mark', async () => {
+    // Per docs/conventions/primary-vs-annex.md § Home worked example: "Kabe" title is Chrome.
+    const { getByText } = await render(<HomeScreen />);
+    expect(getByText('Kabe')).toBeTruthy();
+  });
 });
