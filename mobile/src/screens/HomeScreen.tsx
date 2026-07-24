@@ -1,3 +1,6 @@
+// Goal: See recent practice.
+// Per docs/conventions/primary-vs-annex.md (updated by #8): Home is a dashboard surface.
+// Start-a-Session moved to the tab-bar center button; Home no longer hosts a session-launch CTA.
 import { StyleSheet, Text } from 'react-native';
 import { Screen } from '../components/Screen';
 import { spacing, typography } from '../theme';
