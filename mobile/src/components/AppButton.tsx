@@ -11,13 +11,23 @@ type Props = {
   size?: Size;
   disabled?: boolean;
   style?: ViewStyle;
+  testID?: string;
 };
 
-export function AppButton({ title, onPress, variant = 'primary', size = 'md', disabled, style }: Props) {
+export function AppButton({
+  title,
+  onPress,
+  variant = 'primary',
+  size = 'md',
+  disabled,
+  style,
+  testID,
+}: Props) {
   return (
     <Pressable
       onPress={onPress}
       disabled={disabled}
+      testID={testID}
       accessibilityRole="button"
       accessibilityState={{ disabled: !!disabled }}
       style={({ pressed }) => [

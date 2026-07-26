@@ -85,6 +85,32 @@ function stateAccentFor(pct: number): string {
   return colors.accent;
 }
 
+// Bundles the "progress toward target" concept the three entry modes share.
+// `ratePctInt` uncaps (0..120) so the RATE chip can read "115%"; `trackFillPct`
+// caps at 100 so the progress bar never overflows its container.
+type TargetProgress = {
+  accent: string;
+  ratePctInt: number;
+  trackFillPct: number;
+};
+
+function progressFor(value: number, target: number | null): TargetProgress | null {
+  if (target == null || target <= 0) return null;
+  const pct = Math.min(1.2, Math.max(0, value / target));
+  return {
+    accent: stateAccentFor(pct),
+    ratePctInt: Math.round(pct * 100),
+    trackFillPct: Math.round(Math.min(1, pct) * 100),
+  };
+}
+
+// Cyan is the neutral primary when no target sets state (aesthetic-direction
+// § state-driven accent rule). Pass this explicitly rather than relying on
+// AppButton's default variant colour.
+function primaryAccentFor(progress: TargetProgress | null): string {
+  return progress?.accent ?? colors.accent;
+}
+
 export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
   const [state, setState] = useState<ActiveSessionState | null>(null);
   const [loaded, setLoaded] = useState(false);
@@ -109,7 +135,7 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
     });
     return () => {
       clearInterval(id);
-      sub.remove();
+      sub?.remove();
       deactivateKeepAwake();
     };
   }, [timerStartedAt]);
@@ -246,73 +272,42 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
       ? Math.max(0, Math.floor((clock().getTime() - timerStartedAt.getTime()) / 1000))
       : 0;
     const target = pickedDrill.target;
-    const pct = target != null && target > 0 ? Math.min(1.2, elapsedSeconds / target) : 0;
-    const stateAccent = target != null ? stateAccentFor(pct) : colors.accent;
-    const pctInt = target != null ? Math.round(Math.min(1, pct) * 100) : 0;
+    const progress = progressFor(elapsedSeconds, target);
+    const primaryAccent = primaryAccentFor(progress);
 
     return (
       <Screen edges={['top', 'left', 'right', 'bottom']}>
-        <EntryHeader drill={pickedDrill} stateAccent={stateAccent} inPlay={!!timerStartedAt} />
+        <EntryHeader drill={pickedDrill} />
 
-        <YStack
-          backgroundColor={colors.surface}
-          borderColor={colors.surfaceHi}
-          borderWidth={1}
-          borderRadius={radius.lg}
-          padding={spacing.xl}
-          alignItems="center"
+        <EntryHeroPanel
+          digits={formatMmSs(elapsedSeconds)}
+          progress={progress}
+          trackTestID="duration-progress-track"
           marginTop={spacing.md}
-        >
-          <Text style={[typography.heroDigits, { color: stateAccent }]}>
-            {formatMmSs(elapsedSeconds)}
-          </Text>
-          {target != null ? (
-            <YStack width="100%" marginTop={spacing.lg}>
-              <View
-                height={10}
-                width="100%"
-                borderRadius={radius.pill}
-                backgroundColor={colors.surfaceHi}
-                overflow="hidden"
-              >
-                <View
-                  height="100%"
-                  width={`${pctInt}%`}
-                  backgroundColor={stateAccent}
-                  borderRadius={radius.pill}
-                />
-              </View>
-              <XStack justifyContent="space-between" marginTop={spacing.sm}>
-                <Text style={typography.label}>ELAPSED</Text>
-                <Text
-                  style={[
-                    typography.label,
-                    { color: stateAccent, fontSize: 24, letterSpacing: 0 },
-                  ]}
-                >
-                  {pctInt}%
-                </Text>
-              </XStack>
-            </YStack>
-          ) : null}
-        </YStack>
+        />
 
         {target != null ? (
-          <XStack gap={spacing.md} marginTop={spacing.md}>
-            <StatChip label="TARGET" value={formatMmSs(target)} />
-            <StatChip
-              label="REMAINING"
-              value={formatMmSs(Math.max(0, target - elapsedSeconds))}
-            />
-          </XStack>
+          <EntryStatChips
+            chips={[
+              { label: 'TARGET', value: formatMmSs(target), testID: 'duration-target-chip' },
+              {
+                label: 'REMAINING',
+                value: formatMmSs(Math.max(0, target - elapsedSeconds)),
+                testID: 'duration-remaining-chip',
+              },
+              { label: 'RATE', value: `${progress!.ratePctInt}%`, testID: 'duration-rate-chip' },
+            ]}
+          />
         ) : null}
 
         <YStack gap={spacing.md} marginTop="auto">
-          {timerStartedAt ? (
-            <AppButton title="Stop" onPress={onStopTimer} variant="dangerSolid" size="lg" />
-          ) : (
-            <AppButton title="Start" onPress={onStartTimer} size="lg" />
-          )}
+          <AppButton
+            title={timerStartedAt ? 'Stop' : 'Start'}
+            onPress={timerStartedAt ? onStopTimer : onStartTimer}
+            size="lg"
+            testID="primary-action"
+            style={{ backgroundColor: primaryAccent }}
+          />
           <AppButton title="Cancel" onPress={onCancelEntry} variant="ghost" size="lg" />
         </YStack>
         {menuSheet}
@@ -322,10 +317,39 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
   }
 
   if (pickedDrill?.metric === 'accuracy' && draft?.kind === 'accuracy') {
+    const target = pickedDrill.target;
+    const successes = Number(draft.value || '0') || 0;
+    const attempted = Number(draft.attempted || '0') || 0;
+    const accuracyPctInt = attempted > 0 ? Math.round((successes / attempted) * 100) : 0;
+    const targetPctInt = target ?? 0;
+    const progress = progressFor(accuracyPctInt, target);
+    const primaryAccent = primaryAccentFor(progress);
     return (
       <Screen edges={['top', 'left', 'right', 'bottom']}>
         <EntryHeader drill={pickedDrill} />
-        <XStack alignItems="flex-end" gap={spacing.sm} marginTop={spacing.xl}>
+
+        <EntryHeroPanel
+          digits={`${accuracyPctInt}%`}
+          digitsTestID="accuracy-hero-readout"
+          progress={progress}
+          trackTestID="accuracy-progress-track"
+        />
+
+        {target != null ? (
+          <EntryStatChips
+            chips={[
+              { label: 'TARGET', value: `${targetPctInt}%`, testID: 'accuracy-target-chip' },
+              {
+                label: 'REMAINING',
+                value: `${Math.max(0, targetPctInt - accuracyPctInt)}%`,
+                testID: 'accuracy-remaining-chip',
+              },
+              { label: 'RATE', value: `${progress!.ratePctInt}%`, testID: 'accuracy-rate-chip' },
+            ]}
+          />
+        ) : null}
+
+        <XStack alignItems="flex-end" gap={spacing.sm} marginTop={spacing.lg}>
           <NumberField
             label="SUCCESSES"
             value={draft.value}
@@ -343,7 +367,14 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
           />
         </XStack>
         <YStack gap={spacing.md} marginTop="auto">
-          <AppButton title="Save" onPress={onSaveEntry} size="lg" disabled={!canSaveDraft(state)} />
+          <AppButton
+            title="Save"
+            onPress={onSaveEntry}
+            size="lg"
+            disabled={!canSaveDraft(state)}
+            testID="primary-action"
+            style={{ backgroundColor: primaryAccent }}
+          />
           <AppButton title="Cancel" onPress={onCancelEntry} variant="ghost" size="lg" />
         </YStack>
         {menuSheet}
@@ -353,10 +384,36 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
   }
 
   if (pickedDrill && draft?.kind === 'reps') {
+    const target = pickedDrill.target;
+    const draftValue = Number(draft.value || '0') || 0;
+    const progress = progressFor(draftValue, target);
+    const primaryAccent = primaryAccentFor(progress);
     return (
       <Screen edges={['top', 'left', 'right', 'bottom']}>
         <EntryHeader drill={pickedDrill} />
-        <YStack alignItems="center" marginTop={spacing.xl}>
+
+        <EntryHeroPanel
+          digits={String(draftValue)}
+          digitsTestID="reps-hero-readout"
+          progress={progress}
+          trackTestID="reps-progress-track"
+        />
+
+        {target != null ? (
+          <EntryStatChips
+            chips={[
+              { label: 'TARGET', value: String(target), testID: 'reps-target-chip' },
+              {
+                label: 'REMAINING',
+                value: String(Math.max(0, target - draftValue)),
+                testID: 'reps-remaining-chip',
+              },
+              { label: 'RATE', value: `${progress!.ratePctInt}%`, testID: 'reps-rate-chip' },
+            ]}
+          />
+        ) : null}
+
+        <YStack alignItems="center" marginTop={spacing.lg}>
           <NumberField
             label="REPS"
             value={draft.value}
@@ -366,7 +423,14 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
           />
         </YStack>
         <YStack gap={spacing.md} marginTop="auto">
-          <AppButton title="Save" onPress={onSaveEntry} size="lg" disabled={!canSaveDraft(state)} />
+          <AppButton
+            title="Save"
+            onPress={onSaveEntry}
+            size="lg"
+            disabled={!canSaveDraft(state)}
+            testID="primary-action"
+            style={{ backgroundColor: primaryAccent }}
+          />
           <AppButton title="Cancel" onPress={onCancelEntry} variant="ghost" size="lg" />
         </YStack>
         {menuSheet}
@@ -472,21 +536,75 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
   );
 }
 
-function EntryHeader({
-  drill,
-  stateAccent,
-  inPlay,
-}: {
-  drill: Drill;
-  stateAccent?: string;
-  inPlay?: boolean;
-}) {
-  const eyebrow = inPlay ? `${drill.category.toUpperCase()} · IN PLAY` : drill.category.toUpperCase();
+function EntryHeader({ drill }: { drill: Drill }) {
   return (
     <YStack marginBottom={spacing.lg}>
-      <Text style={[typography.label, { color: stateAccent ?? colors.accent }]}>{eyebrow}</Text>
+      <Text style={[typography.label, { color: colors.accent }]}>
+        {drill.category.toUpperCase()}
+      </Text>
       <Text style={[typography.title, { marginTop: spacing.xs }]}>{drill.name}</Text>
     </YStack>
+  );
+}
+
+function EntryHeroPanel({
+  digits,
+  digitsTestID,
+  progress,
+  trackTestID,
+  marginTop,
+}: {
+  digits: string;
+  digitsTestID?: string;
+  progress: TargetProgress | null;
+  trackTestID?: string;
+  marginTop?: number;
+}) {
+  return (
+    <YStack
+      backgroundColor={colors.surface}
+      borderColor={colors.surfaceHi}
+      borderWidth={1}
+      borderRadius={radius.lg}
+      padding={spacing.xl}
+      alignItems="center"
+      marginTop={marginTop}
+    >
+      <Text testID={digitsTestID} style={typography.heroDigits}>
+        {digits}
+      </Text>
+      {progress ? (
+        <YStack width="100%" marginTop={spacing.lg}>
+          <View
+            testID={trackTestID}
+            height={10}
+            width="100%"
+            borderRadius={radius.pill}
+            backgroundColor={colors.surfaceHi}
+            overflow="hidden"
+          >
+            <View
+              height="100%"
+              width={`${progress.trackFillPct}%`}
+              backgroundColor={progress.accent}
+              borderRadius={radius.pill}
+            />
+          </View>
+        </YStack>
+      ) : null}
+    </YStack>
+  );
+}
+
+type ChipSpec = { label: string; value: string; testID?: string };
+
+function EntryStatChips({ chips }: { chips: ChipSpec[] }) {
+  return (
+    <XStack gap={spacing.md} marginTop={spacing.md}>
+      {chips.map((c) => (
+        <StatChip key={c.label} label={c.label} value={c.value} testID={c.testID} />
+      ))}
+    </XStack>
   );
 }
 
@@ -612,7 +730,15 @@ function SectionLabel({ text }: { text: string }) {
   );
 }
 
-function StatChip({ label, value }: { label: string; value: string }) {
+function StatChip({
+  label,
+  value,
+  testID,
+}: {
+  label: string;
+  value: string;
+  testID?: string;
+}) {
   return (
     <YStack
       flex={1}
@@ -623,8 +749,17 @@ function StatChip({ label, value }: { label: string; value: string }) {
       paddingVertical={14}
       paddingHorizontal={spacing.lg}
     >
-      <Text style={typography.label}>{label}</Text>
+      {/* Mid-drill target labels floor at 24 sp per ergonomic-minima.md. */}
       <Text
+        style={[
+          typography.label,
+          { fontSize: 24, lineHeight: 28, letterSpacing: 1.5 },
+        ]}
+      >
+        {label}
+      </Text>
+      <Text
+        testID={testID ? `${testID}-value` : undefined}
         style={{
           fontSize: 26,
           fontWeight: '800',
