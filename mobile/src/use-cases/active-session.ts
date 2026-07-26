@@ -3,10 +3,12 @@ import { Drill, listDrills } from './drills';
 import { getRoutine, RoutineItem } from './routines';
 import {
   DrillEntry,
+  deleteEntry,
   endSession,
   getActiveSession,
   logEntry,
   Session,
+  updateEntry,
 } from './sessions';
 
 type Clock = () => Date;
@@ -37,8 +39,12 @@ export type ActiveSessionState = {
   drills: Drill[];
   plannedItems: RoutineItem[];
   skippedItemIds: Set<string>;
+  // Per-slot removal keyed as `${itemId}#${slotIndex}` — an in-memory drop that
+  // the fused list respects. Empty-row Delete on the picker adds a key here.
+  removedSlotKeys: Set<string>;
   pickedDrill: Drill | null;
   draft: EntryDraft | null;
+  editingEntryId?: string;
 };
 
 export async function hydrate(db: Db): Promise<ActiveSessionState | null> {
@@ -56,6 +62,7 @@ export async function hydrate(db: Db): Promise<ActiveSessionState | null> {
     drills: allDrills,
     plannedItems,
     skippedItemIds: new Set(),
+    removedSlotKeys: new Set(),
     pickedDrill: null,
     draft: null,
   };
@@ -64,11 +71,28 @@ export async function hydrate(db: Db): Promise<ActiveSessionState | null> {
 export function pickDrill(state: ActiveSessionState, drillId: string): ActiveSessionState {
   const drill = state.drills.find((d) => d.id === drillId);
   if (!drill) return state;
-  return { ...state, pickedDrill: drill, draft: draftForMetric(drill) };
+  const next = { ...state, pickedDrill: drill, draft: draftForMetric(drill) };
+  delete next.editingEntryId;
+  return next;
+}
+
+export function pickEntry(state: ActiveSessionState, entryId: string): ActiveSessionState {
+  const entry = state.entries.find((e) => e.id === entryId);
+  if (!entry) return state;
+  const drill = state.drills.find((d) => d.id === entry.drillId);
+  if (!drill) return state;
+  return {
+    ...state,
+    pickedDrill: drill,
+    draft: draftFromEntry(drill, entry),
+    editingEntryId: entryId,
+  };
 }
 
 export function cancelEntry(state: ActiveSessionState): ActiveSessionState {
-  return { ...state, pickedDrill: null, draft: null };
+  const next = { ...state, pickedDrill: null, draft: null };
+  delete next.editingEntryId;
+  return next;
 }
 
 export function updateDraftValue(state: ActiveSessionState, value: string): ActiveSessionState {
@@ -107,13 +131,21 @@ export async function saveEntry(
     attempted = a;
   }
 
-  await logEntry(db, {
-    sessionId: state.session.id,
-    drillId: state.pickedDrill.id,
-    value,
-    attempted,
-    now: opts.now,
-  });
+  if (state.editingEntryId) {
+    await updateEntry(db, state.editingEntryId, {
+      value,
+      attempted,
+      now: opts.now,
+    });
+  } else {
+    await logEntry(db, {
+      sessionId: state.session.id,
+      drillId: state.pickedDrill.id,
+      value,
+      attempted,
+      now: opts.now,
+    });
+  }
   return refreshEntries(cancelEntry(state), db);
 }
 
@@ -155,6 +187,81 @@ export function visiblePlannedItems(state: ActiveSessionState): RoutineItem[] {
   return state.plannedItems.filter((i) => !state.skippedItemIds.has(i.id));
 }
 
+export type PlannedSlot = {
+  itemId: string;
+  drillId: string;
+  slotIndex: number;
+  entry: DrillEntry | null;
+};
+
+export function adHocEntries(state: ActiveSessionState): DrillEntry[] {
+  const claimed = new Set<string>();
+  const entriesByDrill = new Map<string, DrillEntry[]>();
+  for (const e of state.entries) {
+    const bucket = entriesByDrill.get(e.drillId) ?? [];
+    bucket.push(e);
+    entriesByDrill.set(e.drillId, bucket);
+  }
+  for (const item of state.plannedItems) {
+    if (state.skippedItemIds.has(item.id)) continue;
+    const quota = item.plannedSets ?? 1;
+    const entries = entriesByDrill.get(item.drillId) ?? [];
+    for (let i = 0; i < quota; i++) {
+      if (entries[i]) claimed.add(entries[i].id);
+    }
+  }
+  return state.entries.filter((e) => !claimed.has(e.id));
+}
+
+export function plannedSlots(state: ActiveSessionState): PlannedSlot[] {
+  const out: PlannedSlot[] = [];
+  const entriesByDrill = new Map<string, DrillEntry[]>();
+  for (const e of state.entries) {
+    const bucket = entriesByDrill.get(e.drillId) ?? [];
+    bucket.push(e);
+    entriesByDrill.set(e.drillId, bucket);
+  }
+  for (const item of state.plannedItems) {
+    if (state.skippedItemIds.has(item.id)) continue;
+    const quota = item.plannedSets ?? 1;
+    const entries = entriesByDrill.get(item.drillId) ?? [];
+    for (let i = 0; i < quota; i++) {
+      if (state.removedSlotKeys.has(slotKey(item.id, i))) continue;
+      out.push({
+        itemId: item.id,
+        drillId: item.drillId,
+        slotIndex: i,
+        entry: entries[i] ?? null,
+      });
+    }
+  }
+  return out;
+}
+
+export function slotKey(itemId: string, slotIndex: number): string {
+  return `${itemId}#${slotIndex}`;
+}
+
+export async function deleteEntryAndRefresh(
+  state: ActiveSessionState,
+  db: Db,
+  entryId: string,
+  opts: { now?: Clock } = {}
+): Promise<ActiveSessionState> {
+  await deleteEntry(db, entryId, { now: opts.now });
+  return refreshEntries(state, db);
+}
+
+export function removePlannedSlot(
+  state: ActiveSessionState,
+  itemId: string,
+  slotIndex: number
+): ActiveSessionState {
+  const next = new Set(state.removedSlotKeys);
+  next.add(slotKey(itemId, slotIndex));
+  return { ...state, removedSlotKeys: next };
+}
+
 export function loggedCountForDrill(state: ActiveSessionState, drillId: string): number {
   return state.entries.filter((e) => e.drillId === drillId).length;
 }
@@ -186,4 +293,16 @@ function draftForMetric(drill: Drill): EntryDraft {
     };
   }
   return { kind: 'reps', value: drill.target != null ? String(drill.target) : '' };
+}
+
+function draftFromEntry(drill: Drill, entry: DrillEntry): EntryDraft {
+  if (drill.metric === 'duration') return { kind: 'duration' };
+  if (drill.metric === 'accuracy') {
+    return {
+      kind: 'accuracy',
+      value: String(entry.value),
+      attempted: entry.attempted != null ? String(entry.attempted) : '',
+    };
+  }
+  return { kind: 'reps', value: String(entry.value) };
 }

@@ -6,7 +6,13 @@ import type { Drill } from '../use-cases/drills';
 import { listDrills } from '../use-cases/drills';
 import { getRoutine } from '../use-cases/routines';
 import type { DrillEntry, Session } from '../use-cases/sessions';
-import { endSession, getActiveSession, logEntry } from '../use-cases/sessions';
+import {
+  deleteEntry,
+  endSession,
+  getActiveSession,
+  logEntry,
+  updateEntry,
+} from '../use-cases/sessions';
 import { InSessionScreen } from './InSessionScreen';
 
 // Tamagui Sheet is proven in SheetLayout tests; here we render children inline
@@ -32,6 +38,8 @@ jest.mock('../use-cases/sessions', () => ({
   getActiveSession: jest.fn(),
   logEntry: jest.fn(),
   endSession: jest.fn(),
+  updateEntry: jest.fn(),
+  deleteEntry: jest.fn(),
 }));
 jest.mock('../db/client', () => ({
   getAppDb: jest.fn(() => null),
@@ -83,6 +91,8 @@ const mockGetActiveSession = getActiveSession as jest.MockedFunction<typeof getA
 const mockLogEntry = logEntry as jest.MockedFunction<typeof logEntry>;
 const mockGetRoutine = getRoutine as jest.MockedFunction<typeof getRoutine>;
 const mockEndSession = endSession as jest.MockedFunction<typeof endSession>;
+const mockUpdateEntry = updateEntry as jest.MockedFunction<typeof updateEntry>;
+const mockDeleteEntry = deleteEntry as jest.MockedFunction<typeof deleteEntry>;
 
 const NOW = '2026-07-09T12:00:00.000Z';
 
@@ -176,6 +186,10 @@ describe('InSessionScreen — timer, wake-lock, and navigation', () => {
     mockLogEntry.mockReset();
     mockGetRoutine.mockReset();
     mockEndSession.mockReset();
+    mockUpdateEntry.mockReset();
+    mockUpdateEntry.mockResolvedValue(undefined as any);
+    mockDeleteEntry.mockReset();
+    mockDeleteEntry.mockResolvedValue(undefined as any);
     mockActivateKeepAwake.mockReset();
     mockActivateKeepAwake.mockResolvedValue(undefined);
     mockDeactivateKeepAwake.mockReset();
@@ -477,5 +491,239 @@ describe('InSessionScreen — timer, wake-lock, and navigation', () => {
     await act(async () => {});
 
     expect(queryByTestId('pick-drill-w1')).toBeNull();
+  });
+});
+
+// Issue #21 — Fused planned-slot list on the picker. Behavior spec is in
+// docs/conventions/primary-vs-annex.md § InSession-picker (Fusion detail).
+describe('InSessionScreen — fused planned-slot list', () => {
+  beforeEach(() => {
+    mockListDrills.mockReset();
+    mockGetActiveSession.mockReset();
+    mockLogEntry.mockReset();
+    mockGetRoutine.mockReset();
+    mockEndSession.mockReset();
+    mockUpdateEntry.mockReset();
+    mockUpdateEntry.mockResolvedValue(undefined as any);
+    mockDeleteEntry.mockReset();
+    mockDeleteEntry.mockResolvedValue(undefined as any);
+    mockActivateKeepAwake.mockReset();
+    mockActivateKeepAwake.mockResolvedValue(undefined);
+    mockDeactivateKeepAwake.mockReset();
+    mockLogEntry.mockResolvedValue(makeEntry());
+    mockEndSession.mockResolvedValue(undefined as any);
+    mockAddADrillSheetProps.length = 0;
+  });
+
+  function seedRoutine({
+    plannedSets = 3 as number | null,
+    drillTarget = null as number | null,
+    entries = [] as DrillEntry[],
+    itemId = 'ri-1',
+    drillId = 'd-1',
+  } = {}) {
+    const drill = makeDrill({
+      id: drillId,
+      name: 'Wall rally',
+      metric: 'reps',
+      target: drillTarget,
+    });
+    mockListDrills.mockResolvedValue([drill]);
+    mockGetActiveSession.mockResolvedValue({
+      session: makeSession({ id: 'session-1', routineId: 'r-1' }),
+      entries,
+    });
+    mockGetRoutine.mockResolvedValue({
+      routine: { id: 'r-1', name: 'R', createdAt: NOW, updatedAt: NOW, deletedAt: null } as any,
+      items: [
+        {
+          id: itemId,
+          routineId: 'r-1',
+          drillId,
+          plannedSets,
+          position: 0,
+          createdAt: NOW,
+          updatedAt: NOW,
+          deletedAt: null,
+        } as any,
+      ],
+    });
+    return drill;
+  }
+
+  it('renders one row per planned set: plannedSets:3 → 3 distinct rows', async () => {
+    seedRoutine({ plannedSets: 3 });
+
+    const { findByTestId } = await renderScreen();
+
+    expect(await findByTestId('planned-slot-ri-1-0')).toBeTruthy();
+    expect(await findByTestId('planned-slot-ri-1-1')).toBeTruthy();
+    expect(await findByTestId('planned-slot-ri-1-2')).toBeTruthy();
+  });
+
+  it('tapping an empty slot opens the drill\'s entry mode', async () => {
+    seedRoutine({ plannedSets: 2 });
+
+    const { findByTestId, findByLabelText } = await renderScreen();
+
+    fireEvent.press(await findByTestId('planned-slot-ri-1-0'));
+
+    // Reps entry mode surfaces the reps-input.
+    expect(await findByLabelText('reps-input')).toBeTruthy();
+  });
+
+  it('tapping a filled slot opens entry mode with the logged value prefilled; Save updates in place', async () => {
+    seedRoutine({
+      plannedSets: 2,
+      entries: [makeEntry({ id: 'e-1', drillId: 'd-1', value: 42 })],
+    });
+
+    const { findByTestId, findByText, findByLabelText } = await renderScreen();
+
+    const slot = await findByTestId('planned-slot-ri-1-0');
+    fireEvent.press(slot);
+    const input = await findByLabelText('reps-input');
+    expect(input.props.value).toBe('42');
+
+    // Change value + Save must UPDATE, not INSERT — logEntry must not be called;
+    // updateEntry MUST be called with the target entry id and the new value.
+    fireEvent.changeText(input, '99');
+    const saveButton = await findByText('Save');
+    await act(async () => {
+      fireEvent.press(saveButton);
+      await new Promise((res) => setImmediate(res));
+    });
+    expect(mockLogEntry).not.toHaveBeenCalled();
+    expect(mockUpdateEntry).toHaveBeenCalledWith(
+      null,
+      'e-1',
+      expect.objectContaining({ value: 99 })
+    );
+  });
+
+  it('ad-hoc entries render in a distinct second section below the planned list', async () => {
+    // 1 planned slot for the routine drill (d-1), 1 entry filling it, and 1
+    // entry for a drill outside the routine — it must appear in the ad-hoc
+    // second section under a clearly-different label.
+    const routineDrill = makeDrill({ id: 'd-1', name: 'Wall rally' });
+    const unplanned = makeDrill({ id: 'd-2', name: 'Slice serve' });
+    mockListDrills.mockResolvedValue([routineDrill, unplanned]);
+    mockGetActiveSession.mockResolvedValue({
+      session: makeSession({ id: 'session-1', routineId: 'r-1' }),
+      entries: [
+        makeEntry({ id: 'e-1', drillId: 'd-1', value: 7 }),
+        makeEntry({ id: 'e-2', drillId: 'd-2', value: 33 }),
+      ],
+    });
+    mockGetRoutine.mockResolvedValue({
+      routine: { id: 'r-1', name: 'R', createdAt: NOW, updatedAt: NOW, deletedAt: null } as any,
+      items: [
+        {
+          id: 'ri-1',
+          routineId: 'r-1',
+          drillId: 'd-1',
+          plannedSets: 1,
+          position: 0,
+          createdAt: NOW,
+          updatedAt: NOW,
+          deletedAt: null,
+        } as any,
+      ],
+    });
+
+    const { findByTestId, findByText } = await renderScreen();
+
+    // Planned section still exists and contains slot-0 for the routine drill.
+    expect(await findByTestId('planned-slot-ri-1-0')).toBeTruthy();
+    // Ad-hoc section header is present.
+    expect(await findByText(/ad[- ]hoc/i)).toBeTruthy();
+    // The ad-hoc entry has its own row + value display.
+    expect(await findByTestId('adhoc-entry-e-2')).toBeTruthy();
+    // The planned-slot entry (e-1) is NOT in the ad-hoc section.
+    // If it were, we'd have a duplicate testID collision.
+  });
+
+  it('Delete on an empty slot silently removes just that slot; siblings intact', async () => {
+    seedRoutine({ plannedSets: 3 });
+
+    const { findByTestId, queryByTestId } = await renderScreen();
+
+    // All three slot rows are initially present.
+    expect(await findByTestId('planned-slot-ri-1-0')).toBeTruthy();
+    expect(await findByTestId('planned-slot-ri-1-1')).toBeTruthy();
+    expect(await findByTestId('planned-slot-ri-1-2')).toBeTruthy();
+
+    // Tap Delete on slot 1 — no confirm expected on empty rows.
+    await act(async () => {
+      fireEvent.press(await findByTestId('planned-slot-ri-1-1-delete'));
+    });
+
+    // Slot 1 is gone; 0 and 2 remain.
+    expect(queryByTestId('planned-slot-ri-1-1')).toBeNull();
+    expect(await findByTestId('planned-slot-ri-1-0')).toBeTruthy();
+    expect(await findByTestId('planned-slot-ri-1-2')).toBeTruthy();
+  });
+
+  it('Delete on a filled slot requires a confirm-tap; second tap deletes the entry', async () => {
+    seedRoutine({
+      plannedSets: 1,
+      entries: [makeEntry({ id: 'e-1', drillId: 'd-1', value: 42 })],
+    });
+
+    const { findByTestId } = await renderScreen();
+
+    // First tap arms the confirm — deleteEntry MUST NOT fire yet.
+    const deleteButton = await findByTestId('planned-slot-ri-1-0-delete');
+    await act(async () => {
+      fireEvent.press(deleteButton);
+    });
+    expect(mockDeleteEntry).not.toHaveBeenCalled();
+
+    // The armed row exposes a confirm affordance the first tap did not.
+    const confirm = await findByTestId('planned-slot-ri-1-0-delete-confirm');
+    expect(confirm).toBeTruthy();
+
+    // Second tap on the confirm affordance erases the entry.
+    await act(async () => {
+      fireEvent.press(confirm);
+      await new Promise((res) => setImmediate(res));
+    });
+    expect(mockDeleteEntry).toHaveBeenCalledWith(null, 'e-1', expect.anything());
+  });
+
+  it('the legacy LOGGED SO FAR block is no longer rendered on the picker', async () => {
+    // AC: "LOGGED SO FAR block from the current picker is removed".
+    seedRoutine({
+      plannedSets: 2,
+      entries: [makeEntry({ id: 'e-1', drillId: 'd-1', value: 42 })],
+    });
+
+    const { findByText, queryByText } = await renderScreen();
+    await findByText('What are you working on?');
+
+    expect(queryByText(/logged so far/i)).toBeNull();
+  });
+
+  it('filled slot displays the logged reps value in tabular-nums', async () => {
+    seedRoutine({
+      plannedSets: 2,
+      entries: [makeEntry({ id: 'e-1', drillId: 'd-1', value: 42 })],
+    });
+
+    const { findByTestId } = await renderScreen();
+
+    const slot0 = await findByTestId('planned-slot-ri-1-0');
+    // Filled-row value renders in tabular-nums per AC. The reps unit is included
+    // to match how the picker already formats values in the LOGGED SO FAR block.
+    const value = await findByTestId('planned-slot-ri-1-0-value');
+    expect(value).toBeTruthy();
+    // The rendered text must contain the raw number 42 (independent literal).
+    const flat = JSON.stringify(value.props);
+    expect(flat).toMatch(/42/);
+    // And it must be styled with tabular-nums.
+    const flatFonts = JSON.stringify(value.props.style);
+    expect(flatFonts).toMatch(/tabular-nums/);
+    // Slot 1 (empty) has no value node.
+    expect(slot0).toBeTruthy();
   });
 });

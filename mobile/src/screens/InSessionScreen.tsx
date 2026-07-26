@@ -12,18 +12,20 @@ import type { RootStackParamList } from '../navigation/types';
 import { colors, radius, spacing, typography } from '../theme';
 import {
   ActiveSessionState,
+  adHocEntries,
   canSaveDraft,
   cancelEntry,
+  deleteEntryAndRefresh,
   endActiveSession,
   hydrate,
-  loggedCountForDrill,
   pickDrill,
+  pickEntry,
+  plannedSlots,
+  removePlannedSlot,
   saveDurationEntry,
   saveEntry,
-  skipPlannedItem,
   updateDraftAttempted,
   updateDraftValue,
-  visiblePlannedItems,
 } from '../use-cases/active-session';
 import { Drill } from '../use-cases/drills';
 
@@ -45,6 +47,24 @@ function unitForMetric(metric: Drill['metric']): string {
   return '';
 }
 
+const deleteButtonStyle = {
+  minHeight: 56,
+  minWidth: 56,
+  paddingHorizontal: spacing.md,
+  marginLeft: spacing.sm,
+  alignItems: 'center' as const,
+  justifyContent: 'center' as const,
+};
+
+function formatEntryValue(
+  entry: { value: number; attempted: number | null },
+  metric: Drill['metric']
+): string {
+  if (metric === 'accuracy') return `${entry.value} / ${entry.attempted ?? '?'}`;
+  if (metric === 'duration') return formatMmSs(entry.value);
+  return `${entry.value} ${unitForMetric(metric)}`;
+}
+
 // State-driven accent per aesthetic-direction.md: cyan <90%, amber 90–100%, magenta ≥100%.
 function stateAccentFor(pct: number): string {
   if (pct >= 1) return colors.accentMagenta;
@@ -59,6 +79,7 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
   const [addDrillOpen, setAddDrillOpen] = useState(false);
   const [, setTick] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [pendingDeleteEntryId, setPendingDeleteEntryId] = useState<string | null>(null);
 
   // Publish the three-dot handler up through navigation options so the shared
   // PillHeader (rendered by RootStack) can bind it. See App.tsx#renderPillHeader.
@@ -96,6 +117,11 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
   function onPickDrill(drillId: string) {
     setTimerStartedAt(null);
     setState((s) => (s ? pickDrill(s, drillId) : s));
+  }
+
+  function onPickEntry(entryId: string) {
+    setTimerStartedAt(null);
+    setState((s) => (s ? pickEntry(s, entryId) : s));
   }
 
   function onCancelEntry() {
@@ -275,7 +301,8 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
     );
   }
 
-  const planned = visiblePlannedItems(state);
+  const slots = plannedSlots(state);
+  const adhoc = adHocEntries(state);
 
   return (
     <Screen padded={false} edges={['top', 'left', 'right', 'bottom']}>
@@ -291,21 +318,21 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
             paddingBottom: spacing.lg,
           }}
         >
-          {planned.length > 0 ? (
+          {slots.length > 0 ? (
             <YStack marginBottom={spacing.md} gap={spacing.sm}>
               <SectionLabel text="PLANNED" />
-              {planned.map((item) => {
-                const drill = state.drills.find((d) => d.id === item.drillId);
-                const logged = loggedCountForDrill(state, item.drillId);
-                const badge =
-                  item.plannedSets != null
-                    ? `${logged} / ${item.plannedSets}`
-                    : `logged: ${logged}`;
+              {slots.map((slot) => {
+                const drill = state.drills.find((d) => d.id === slot.drillId);
+                const rowKey = `${slot.itemId}-${slot.slotIndex}`;
+                const filled = slot.entry != null;
                 return (
                   <Pressable
-                    key={item.id}
-                    testID={`planned-item-${item.id}`}
-                    onPress={() => drill && onPickDrill(drill.id)}
+                    key={rowKey}
+                    testID={`planned-slot-${rowKey}`}
+                    onPress={() => {
+                      if (slot.entry) onPickEntry(slot.entry.id);
+                      else if (drill) onPickDrill(drill.id);
+                    }}
                     style={({ pressed }) => [
                       {
                         flexDirection: 'row',
@@ -322,68 +349,108 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
                     <YStack flex={1}>
                       <Text style={typography.title}>{drill?.name ?? 'Drill'}</Text>
                     </YStack>
-                    <View
-                      backgroundColor={colors.surfaceHi}
-                      paddingHorizontal={spacing.sm}
-                      paddingVertical={2}
-                      borderRadius={radius.pill}
-                    >
-                      <Text style={[typography.caption, { color: colors.accent, fontWeight: '700' }]}>
-                        {badge}
+                    {filled && slot.entry ? (
+                      <Text
+                        testID={`planned-slot-${rowKey}-value`}
+                        style={[
+                          typography.body,
+                          { color: colors.textSecondary, fontVariant: ['tabular-nums'] },
+                        ]}
+                      >
+                        {formatEntryValue(slot.entry, drill?.metric ?? 'reps')}
                       </Text>
-                    </View>
-                    <Pressable
-                      testID={`skip-${item.id}`}
-                      onPress={() =>
-                        setState((s) => (s ? skipPlannedItem(s, item.id) : s))
-                      }
-                      style={{
-                        minHeight: 56,
-                        minWidth: 56,
-                        paddingHorizontal: spacing.md,
-                        marginLeft: spacing.sm,
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                      }}
-                    >
-                      <Text style={[typography.label, { color: colors.textSecondary }]}>
-                        Skip
-                      </Text>
-                    </Pressable>
+                    ) : null}
+                    {filled && slot.entry ? (
+                      pendingDeleteEntryId === slot.entry.id ? (
+                        <Pressable
+                          testID={`planned-slot-${rowKey}-delete-confirm`}
+                          onPress={async () => {
+                            const entryId = slot.entry!.id;
+                            setPendingDeleteEntryId(null);
+                            const next = await deleteEntryAndRefresh(
+                              state,
+                              getAppDb(),
+                              entryId,
+                              { now: clock }
+                            );
+                            setState(next);
+                          }}
+                          style={deleteButtonStyle}
+                        >
+                          <Text style={[typography.label, { color: colors.danger }]}>
+                            Confirm
+                          </Text>
+                        </Pressable>
+                      ) : (
+                        <Pressable
+                          testID={`planned-slot-${rowKey}-delete`}
+                          onPress={() =>
+                            slot.entry && setPendingDeleteEntryId(slot.entry.id)
+                          }
+                          style={deleteButtonStyle}
+                        >
+                          <Text style={[typography.label, { color: colors.textSecondary }]}>
+                            Delete
+                          </Text>
+                        </Pressable>
+                      )
+                    ) : (
+                      <Pressable
+                        testID={`planned-slot-${rowKey}-delete`}
+                        onPress={() =>
+                          setState((s) =>
+                            s ? removePlannedSlot(s, slot.itemId, slot.slotIndex) : s
+                          )
+                        }
+                        style={deleteButtonStyle}
+                      >
+                        <Text style={[typography.label, { color: colors.textSecondary }]}>
+                          Delete
+                        </Text>
+                      </Pressable>
+                    )}
                   </Pressable>
                 );
               })}
             </YStack>
           ) : null}
 
-          {state.entries.length > 0 ? (
-            <YStack marginTop={spacing.md}>
-              <SectionLabel text="LOGGED SO FAR" />
-              {state.entries.map((e) => {
-                const drill = state.drills.find((d) => d.id === e.drillId);
+          {adhoc.length > 0 ? (
+            <YStack marginTop={spacing.md} gap={spacing.sm}>
+              <SectionLabel text="AD-HOC" />
+              {adhoc.map((entry) => {
+                const drill = state.drills.find((d) => d.id === entry.drillId);
                 return (
-                  <XStack
-                    key={e.id}
-                    alignItems="center"
-                    justifyContent="space-between"
-                    paddingVertical={spacing.sm}
-                    borderBottomWidth={1}
-                    borderBottomColor={colors.surfaceHi}
+                  <Pressable
+                    key={entry.id}
+                    testID={`adhoc-entry-${entry.id}`}
+                    onPress={() => onPickEntry(entry.id)}
+                    style={({ pressed }) => [
+                      {
+                        flexDirection: 'row',
+                        alignItems: 'center',
+                        backgroundColor: colors.surface,
+                        borderRadius: radius.md,
+                        borderWidth: 1,
+                        borderColor: colors.surfaceHi,
+                        padding: spacing.lg,
+                      },
+                      pressed ? { backgroundColor: colors.surfaceHi } : null,
+                    ]}
                   >
-                    <Text style={[typography.body, { flex: 1 }]}>{drill?.name ?? 'Drill'}</Text>
+                    <YStack flex={1}>
+                      <Text style={typography.title}>{drill?.name ?? 'Drill'}</Text>
+                    </YStack>
                     <Text
+                      testID={`adhoc-entry-${entry.id}-value`}
                       style={[
                         typography.body,
                         { color: colors.textSecondary, fontVariant: ['tabular-nums'] },
                       ]}
                     >
-                      {drill?.metric === 'accuracy'
-                        ? `${e.value} / ${e.attempted ?? '?'}`
-                        : drill?.metric === 'duration'
-                        ? formatMmSs(e.value)
-                        : `${e.value} ${unitForMetric(drill?.metric ?? 'reps')}`}
+                      {formatEntryValue(entry, drill?.metric ?? 'reps')}
                     </Text>
-                  </XStack>
+                  </Pressable>
                 );
               })}
             </YStack>

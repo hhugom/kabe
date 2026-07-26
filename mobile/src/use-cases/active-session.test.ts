@@ -2,11 +2,16 @@ import { v4 as uuidv4 } from 'uuid';
 import { drills } from '../db/schema';
 import { createTestDb, TestDb } from '../db/test-db';
 import {
+  adHocEntries,
   cancelEntry,
+  deleteEntryAndRefresh,
   endActiveSession,
   hydrate,
   loggedCountForDrill,
   pickDrill,
+  pickEntry,
+  plannedSlots,
+  removePlannedSlot,
   saveDurationEntry,
   saveEntry,
   skipPlannedItem,
@@ -361,6 +366,206 @@ describe('loggedCountForDrill', () => {
     expect(loggedCountForDrill(state, dA)).toBe(2);
     expect(loggedCountForDrill(state, dB)).toBe(1);
     expect(loggedCountForDrill(state, 'missing')).toBe(0);
+  });
+});
+
+describe('plannedSlots', () => {
+  it('fills slots with entries for that drill in chronological order; overflow entries do not fill', async () => {
+    const db = createTestDb();
+    const d = await insertDrill(db, { name: 'Wall rally', metric: 'reps' });
+    const routine = await createRoutine(db, {
+      name: 'W',
+      items: [{ drillId: d, plannedSets: 2 }],
+      now: clock,
+    });
+    const session = await startSession(db, { routineId: routine.id, now: clock });
+    await logEntry(db, {
+      sessionId: session.id,
+      drillId: d,
+      value: 10,
+      performedAt: '2026-07-09T12:01:00.000Z',
+      now: clock,
+    });
+    await logEntry(db, {
+      sessionId: session.id,
+      drillId: d,
+      value: 20,
+      performedAt: '2026-07-09T12:02:00.000Z',
+      now: clock,
+    });
+    await logEntry(db, {
+      sessionId: session.id,
+      drillId: d,
+      value: 30,
+      performedAt: '2026-07-09T12:03:00.000Z',
+      now: clock,
+    });
+    const state = (await hydrate(db))!;
+
+    const slots = plannedSlots(state);
+
+    expect(slots.length).toBe(2);
+    expect(slots[0].entry?.value).toBe(10);
+    expect(slots[1].entry?.value).toBe(20);
+    // The third entry (value 30) has no slot to fill — it does not appear in plannedSlots.
+  });
+
+  it('emits one slot per planned set (plannedSets: 3 → 3 empty rows in order)', async () => {
+    const db = createTestDb();
+    const d = await insertDrill(db, { name: 'Wall rally', metric: 'reps' });
+    const routine = await createRoutine(db, {
+      name: 'W',
+      items: [{ drillId: d, plannedSets: 3 }],
+      now: clock,
+    });
+    await startSession(db, { routineId: routine.id, now: clock });
+    const state = (await hydrate(db))!;
+
+    const slots = plannedSlots(state);
+
+    expect(slots.map((s) => s.slotIndex)).toEqual([0, 1, 2]);
+    expect(slots.every((s) => s.drillId === d)).toBe(true);
+    expect(slots.every((s) => s.entry === null)).toBe(true);
+    expect(slots.every((s) => s.itemId === state.plannedItems[0].id)).toBe(true);
+  });
+});
+
+describe('deleteEntryAndRefresh', () => {
+  it('soft-deletes the entry and returns state with entries refreshed from the DB', async () => {
+    const db = createTestDb();
+    const session = await startSession(db, { now: clock });
+    const d = await insertDrill(db, { metric: 'reps' });
+    await logEntry(db, { sessionId: session.id, drillId: d, value: 10, now: clock });
+    await logEntry(db, { sessionId: session.id, drillId: d, value: 20, now: clock });
+    const state = (await hydrate(db))!;
+    const idToDelete = state.entries[0].id;
+
+    const next = await deleteEntryAndRefresh(state, db, idToDelete);
+
+    expect(next.entries.map((e) => e.id)).not.toContain(idToDelete);
+    expect(next.entries.length).toBe(1);
+    expect(next.entries[0].value).toBe(20);
+  });
+});
+
+describe('removePlannedSlot', () => {
+  it('removes a single slot from an item without touching sibling slots', async () => {
+    const db = createTestDb();
+    const d = await insertDrill(db, { name: 'Wall rally', metric: 'reps' });
+    const routine = await createRoutine(db, {
+      name: 'W',
+      items: [{ drillId: d, plannedSets: 3 }],
+      now: clock,
+    });
+    await startSession(db, { routineId: routine.id, now: clock });
+    const state = (await hydrate(db))!;
+    const itemId = state.plannedItems[0].id;
+
+    const next = removePlannedSlot(state, itemId, 1);
+
+    const slots = plannedSlots(next);
+    expect(slots.map((s) => s.slotIndex)).toEqual([0, 2]);
+  });
+});
+
+describe('adHocEntries', () => {
+  it('returns entries not covered by any planned slot: unplanned drills + overflow', async () => {
+    const db = createTestDb();
+    const planned = await insertDrill(db, { name: 'Wall rally', metric: 'reps' });
+    const unplanned = await insertDrill(db, { name: 'Slice serve', metric: 'reps' });
+    const routine = await createRoutine(db, {
+      name: 'W',
+      items: [{ drillId: planned, plannedSets: 1 }],
+      now: clock,
+    });
+    const session = await startSession(db, { routineId: routine.id, now: clock });
+    // 1 planned-drill entry — fills the single slot; the second planned-drill
+    // entry has no slot → ad-hoc. The unplanned-drill entry → ad-hoc.
+    await logEntry(db, {
+      sessionId: session.id,
+      drillId: planned,
+      value: 10,
+      performedAt: '2026-07-09T12:01:00.000Z',
+      now: clock,
+    });
+    await logEntry(db, {
+      sessionId: session.id,
+      drillId: planned,
+      value: 20,
+      performedAt: '2026-07-09T12:02:00.000Z',
+      now: clock,
+    });
+    await logEntry(db, {
+      sessionId: session.id,
+      drillId: unplanned,
+      value: 33,
+      performedAt: '2026-07-09T12:03:00.000Z',
+      now: clock,
+    });
+    const state = (await hydrate(db))!;
+
+    const adhoc = adHocEntries(state);
+
+    expect(adhoc.map((e) => e.value).sort((a, b) => a - b)).toEqual([20, 33]);
+  });
+});
+
+describe('pickEntry', () => {
+  it('opens the entry\'s drill in edit mode with the value prefilled and editingEntryId set', async () => {
+    const db = createTestDb();
+    const session = await startSession(db, { now: clock });
+    const d = await insertDrill(db, { name: 'Wall rally', metric: 'reps' });
+    await logEntry(db, { sessionId: session.id, drillId: d, value: 42, now: clock });
+    const state = (await hydrate(db))!;
+    const entryId = state.entries[0].id;
+
+    const next = pickEntry(state, entryId);
+
+    expect(next.pickedDrill?.id).toBe(d);
+    expect(next.draft).toEqual({ kind: 'reps', value: '42' });
+    expect(next.editingEntryId).toBe(entryId);
+  });
+
+  it('opens accuracy entries with value and attempted prefilled', async () => {
+    const db = createTestDb();
+    const session = await startSession(db, { now: clock });
+    const d = await insertDrill(db, { name: 'Serve', metric: 'accuracy' });
+    await logEntry(db, {
+      sessionId: session.id,
+      drillId: d,
+      value: 16,
+      attempted: 20,
+      now: clock,
+    });
+    const state = (await hydrate(db))!;
+    const entryId = state.entries[0].id;
+
+    const next = pickEntry(state, entryId);
+
+    expect(next.draft).toEqual({ kind: 'accuracy', value: '16', attempted: '20' });
+    expect(next.editingEntryId).toBe(entryId);
+  });
+});
+
+describe('saveEntry when editing', () => {
+  it('updates the existing entry instead of inserting a new one', async () => {
+    const db = createTestDb();
+    const session = await startSession(db, { now: clock });
+    const d = await insertDrill(db, { name: 'Wall rally', metric: 'reps' });
+    await logEntry(db, { sessionId: session.id, drillId: d, value: 10, now: clock });
+    let state = (await hydrate(db))!;
+    const originalEntryId = state.entries[0].id;
+    state = pickEntry(state, originalEntryId);
+    state = updateDraftValue(state, '77');
+
+    const next = await saveEntry(state, db, { now: clock });
+
+    expect(next.pickedDrill).toBeNull();
+    expect(next.draft).toBeNull();
+    expect(next.editingEntryId).toBeUndefined();
+    expect(next.entries.length).toBe(1);
+    expect(next.entries[0].id).toBe(originalEntryId);
+    expect(next.entries[0].value).toBe(77);
   });
 });
 
