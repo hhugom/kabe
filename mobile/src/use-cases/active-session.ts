@@ -42,6 +42,9 @@ export type ActiveSessionState = {
   entries: DrillEntry[];
   drills: Drill[];
   plannedItems: RoutineItem[];
+  // Whole-item skip: populated by bulk-resolve-unfilled-slots at End Session.
+  // The picker hides all slots for any item in this set.
+  skippedItemIds: Set<string>;
   removedSlots: RemovedSlots;
   pickedDrill: Drill | null;
   draft: EntryDraft | null;
@@ -62,6 +65,7 @@ export async function hydrate(db: Db): Promise<ActiveSessionState | null> {
     entries: active.entries,
     drills: allDrills,
     plannedItems,
+    skippedItemIds: new Set(),
     removedSlots: new Map(),
     pickedDrill: null,
     draft: null,
@@ -196,6 +200,7 @@ export function adHocEntries(state: ActiveSessionState): DrillEntry[] {
   const claimed = new Set<string>();
   const entriesByDrill = groupEntriesByDrill(state.entries);
   for (const item of state.plannedItems) {
+    if (state.skippedItemIds.has(item.id)) continue;
     const quota = item.plannedSets ?? 1;
     const entries = entriesByDrill.get(item.drillId) ?? [];
     for (let i = 0; i < quota; i++) {
@@ -209,6 +214,7 @@ export function plannedSlots(state: ActiveSessionState): PlannedSlot[] {
   const out: PlannedSlot[] = [];
   const entriesByDrill = groupEntriesByDrill(state.entries);
   for (const item of state.plannedItems) {
+    if (state.skippedItemIds.has(item.id)) continue;
     const quota = item.plannedSets ?? 1;
     const entries = entriesByDrill.get(item.drillId) ?? [];
     const removed = state.removedSlots.get(item.id);

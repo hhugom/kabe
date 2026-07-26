@@ -84,6 +84,7 @@ describe('hydrate', () => {
     expect(state!.pickedDrill).toBeNull();
     expect(state!.draft).toBeNull();
     expect(state!.editingEntryId).toBeNull();
+    expect(state!.skippedItemIds).toEqual(new Set());
     expect(state!.removedSlots).toEqual(new Map());
   });
 

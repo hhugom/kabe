@@ -5,6 +5,7 @@ import { AppState, Pressable, ScrollView, TextInput } from 'react-native';
 import { Text, View, XStack, YStack } from 'tamagui';
 import { AddADrillSheet } from '../components/AddADrillSheet';
 import { AppButton } from '../components/AppButton';
+import { ModalLayout } from '../components/ModalLayout';
 import { Row } from '../components/Row';
 import { Screen } from '../components/Screen';
 import { SessionMenuSheet } from '../components/SessionMenuSheet';
@@ -30,6 +31,11 @@ import {
   updateDraftAttempted,
   updateDraftValue,
 } from '../use-cases/active-session';
+import {
+  completeToTarget,
+  skipAllUnfilled,
+  unfilledSlots,
+} from '../use-cases/bulk-resolve-unfilled-slots';
 import { Drill } from '../use-cases/drills';
 import type { DrillEntry } from '../use-cases/sessions';
 
@@ -87,6 +93,7 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
   const [, setTick] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
   const [pendingDeleteEntryId, setPendingDeleteEntryId] = useState<string | null>(null);
+  const [unfilledModalOpen, setUnfilledModalOpen] = useState(false);
 
   // Publish the three-dot handler up through navigation options so the shared
   // PillHeader (rendered by RootStack) can bind it. See App.tsx#renderPillHeader.
@@ -174,6 +181,33 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
     navigation.goBack();
   }
 
+  function requestEnd() {
+    if (!state) return;
+    if (unfilledSlots(state).length > 0) {
+      setUnfilledModalOpen(true);
+    } else {
+      onEnd();
+    }
+  }
+
+  async function onCompleteToTarget() {
+    if (!state) return;
+    const next = await completeToTarget(state, getAppDb(), { now: clock });
+    setState(next);
+    setUnfilledModalOpen(false);
+    await endActiveSession(next, getAppDb(), { now: clock });
+    navigation.goBack();
+  }
+
+  async function onSkipAllUnfilled() {
+    if (!state) return;
+    const next = skipAllUnfilled(state);
+    setState(next);
+    setUnfilledModalOpen(false);
+    await endActiveSession(next, getAppDb(), { now: clock });
+    navigation.goBack();
+  }
+
   if (!loaded || !state) return <Screen />;
 
   const { pickedDrill, draft } = state;
@@ -184,9 +218,27 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
       onOpenChange={setMenuOpen}
       onEndSession={() => {
         setMenuOpen(false);
-        onEnd();
+        requestEnd();
       }}
     />
+  );
+
+  // Modal-archetype 4 (docs/conventions/navigation-surface.md § Modal): tap-outside
+  // is ignored by ModalLayout; hardware back maps to onCancel (session stays active).
+  const unfilledModal = (
+    <ModalLayout
+      open={unfilledModalOpen}
+      onCancel={() => setUnfilledModalOpen(false)}
+      title="Unfilled planned slots"
+    >
+      <AppButton title="Complete to target" onPress={onCompleteToTarget} size="lg" />
+      <AppButton
+        title="Skip all"
+        onPress={onSkipAllUnfilled}
+        size="lg"
+        variant="dangerSolid"
+      />
+    </ModalLayout>
   );
 
   if (pickedDrill?.metric === 'duration' && draft?.kind === 'duration') {
@@ -264,6 +316,7 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
           <AppButton title="Cancel" onPress={onCancelEntry} variant="ghost" size="lg" />
         </YStack>
         {menuSheet}
+        {unfilledModal}
       </Screen>
     );
   }
@@ -294,6 +347,7 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
           <AppButton title="Cancel" onPress={onCancelEntry} variant="ghost" size="lg" />
         </YStack>
         {menuSheet}
+        {unfilledModal}
       </Screen>
     );
   }
@@ -316,6 +370,7 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
           <AppButton title="Cancel" onPress={onCancelEntry} variant="ghost" size="lg" />
         </YStack>
         {menuSheet}
+        {unfilledModal}
       </Screen>
     );
   }
@@ -412,6 +467,7 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
         }}
       />
       {menuSheet}
+      {unfilledModal}
     </Screen>
   );
 }
