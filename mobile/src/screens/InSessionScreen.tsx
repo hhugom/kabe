@@ -6,6 +6,7 @@ import { Text, View, XStack, YStack } from 'tamagui';
 import { AddADrillSheet } from '../components/AddADrillSheet';
 import { AppButton } from '../components/AppButton';
 import { ModalLayout } from '../components/ModalLayout';
+import { Row } from '../components/Row';
 import { Screen } from '../components/Screen';
 import { SessionMenuSheet } from '../components/SessionMenuSheet';
 import { getAppDb } from '../db/client';
@@ -13,18 +14,22 @@ import type { RootStackParamList } from '../navigation/types';
 import { colors, radius, spacing, typography } from '../theme';
 import {
   ActiveSessionState,
+  adHocEntries,
   canSaveDraft,
   cancelEntry,
+  deleteEntryAndRefresh,
   endActiveSession,
   hydrate,
-  loggedCountForDrill,
+  PlannedSlot,
   pickDrill,
+  pickEntry,
+  pickSlot,
+  plannedSlots,
+  removePlannedSlot,
   saveDurationEntry,
   saveEntry,
-  skipPlannedItem,
   updateDraftAttempted,
   updateDraftValue,
-  visiblePlannedItems,
 } from '../use-cases/active-session';
 import {
   completeToTarget,
@@ -32,6 +37,7 @@ import {
   unfilledSlots,
 } from '../use-cases/bulk-resolve-unfilled-slots';
 import { Drill } from '../use-cases/drills';
+import type { DrillEntry } from '../use-cases/sessions';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'InSession'> & {
   clock?: () => Date;
@@ -51,6 +57,27 @@ function unitForMetric(metric: Drill['metric']): string {
   return '';
 }
 
+// Delete lives in its own tap region beside the row's primary surface. Per
+// ergonomic-minima § destructive-adjacent, either ≥24 dp gap OR "visually
+// distinct region" is required — the danger-coloured label plus the outer
+// XStack gap keeps this on the right side of both.
+const deleteButtonStyle = {
+  minHeight: 56,
+  minWidth: 56,
+  paddingHorizontal: spacing.md,
+  alignItems: 'center' as const,
+  justifyContent: 'center' as const,
+};
+
+function formatEntryValue(
+  entry: { value: number; attempted: number | null },
+  metric: Drill['metric']
+): string {
+  if (metric === 'accuracy') return `${entry.value} / ${entry.attempted ?? '?'}`;
+  if (metric === 'duration') return formatMmSs(entry.value);
+  return `${entry.value} ${unitForMetric(metric)}`;
+}
+
 // State-driven accent per aesthetic-direction.md: cyan <90%, amber 90–100%, magenta ≥100%.
 function stateAccentFor(pct: number): string {
   if (pct >= 1) return colors.accentMagenta;
@@ -65,6 +92,7 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
   const [addDrillOpen, setAddDrillOpen] = useState(false);
   const [, setTick] = useState(0);
   const [menuOpen, setMenuOpen] = useState(false);
+  const [pendingDeleteEntryId, setPendingDeleteEntryId] = useState<string | null>(null);
   const [unfilledModalOpen, setUnfilledModalOpen] = useState(false);
 
   // Publish the three-dot handler up through navigation options so the shared
@@ -103,6 +131,23 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
   function onPickDrill(drillId: string) {
     setTimerStartedAt(null);
     setState((s) => (s ? pickDrill(s, drillId) : s));
+  }
+
+  function onPickEntry(entryId: string) {
+    setTimerStartedAt(null);
+    setState((s) => (s ? pickEntry(s, entryId) : s));
+  }
+
+  function onPickSlot(slot: PlannedSlot) {
+    setTimerStartedAt(null);
+    setState((s) => (s ? pickSlot(s, slot) : s));
+  }
+
+  async function onConfirmDeleteEntry(entryId: string) {
+    if (!state) return;
+    setPendingDeleteEntryId(null);
+    const next = await deleteEntryAndRefresh(state, getAppDb(), entryId, { now: clock });
+    setState(next);
   }
 
   function onCancelEntry() {
@@ -330,7 +375,8 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
     );
   }
 
-  const planned = visiblePlannedItems(state);
+  const slots = plannedSlots(state);
+  const adhoc = adHocEntries(state);
 
   return (
     <Screen padded={false} edges={['top', 'left', 'right', 'bottom']}>
@@ -346,99 +392,50 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
             paddingBottom: spacing.lg,
           }}
         >
-          {planned.length > 0 ? (
+          {slots.length > 0 ? (
             <YStack marginBottom={spacing.md} gap={spacing.sm}>
               <SectionLabel text="PLANNED" />
-              {planned.map((item) => {
-                const drill = state.drills.find((d) => d.id === item.drillId);
-                const logged = loggedCountForDrill(state, item.drillId);
-                const badge =
-                  item.plannedSets != null
-                    ? `${logged} / ${item.plannedSets}`
-                    : `logged: ${logged}`;
+              {slots.map((slot) => {
+                const drill = state.drills.find((d) => d.id === slot.drillId);
+                const rowKey = `${slot.itemId}-${slot.slotIndex}`;
+                const armed = slot.entry != null && pendingDeleteEntryId === slot.entry.id;
                 return (
-                  <Pressable
-                    key={item.id}
-                    testID={`planned-item-${item.id}`}
-                    onPress={() => drill && onPickDrill(drill.id)}
-                    style={({ pressed }) => [
-                      {
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        backgroundColor: colors.surface,
-                        borderRadius: radius.md,
-                        borderWidth: 1,
-                        borderColor: colors.surfaceHi,
-                        padding: spacing.lg,
-                      },
-                      pressed ? { backgroundColor: colors.surfaceHi } : null,
-                    ]}
-                  >
-                    <YStack flex={1}>
-                      <Text style={typography.title}>{drill?.name ?? 'Drill'}</Text>
-                    </YStack>
-                    <View
-                      backgroundColor={colors.surfaceHi}
-                      paddingHorizontal={spacing.sm}
-                      paddingVertical={2}
-                      borderRadius={radius.pill}
-                    >
-                      <Text style={[typography.caption, { color: colors.accent, fontWeight: '700' }]}>
-                        {badge}
-                      </Text>
-                    </View>
-                    <Pressable
-                      testID={`skip-${item.id}`}
-                      onPress={() =>
-                        setState((s) => (s ? skipPlannedItem(s, item.id) : s))
-                      }
-                      style={{
-                        minHeight: 56,
-                        minWidth: 56,
-                        paddingHorizontal: spacing.md,
-                        marginLeft: spacing.sm,
-                        alignItems: 'center',
-                        justifyContent: 'center',
-                      }}
-                    >
-                      <Text style={[typography.label, { color: colors.textSecondary }]}>
-                        Skip
-                      </Text>
-                    </Pressable>
-                  </Pressable>
+                  <PlannedSlotRow
+                    key={rowKey}
+                    rowKey={rowKey}
+                    slot={slot}
+                    drill={drill}
+                    armed={armed}
+                    onPick={() => onPickSlot(slot)}
+                    onArmDelete={() =>
+                      slot.entry && setPendingDeleteEntryId(slot.entry.id)
+                    }
+                    onConfirmDelete={() =>
+                      slot.entry && onConfirmDeleteEntry(slot.entry.id)
+                    }
+                    onRemoveEmpty={() =>
+                      setState((s) =>
+                        s ? removePlannedSlot(s, slot.itemId, slot.slotIndex) : s
+                      )
+                    }
+                  />
                 );
               })}
             </YStack>
           ) : null}
 
-          {state.entries.length > 0 ? (
-            <YStack marginTop={spacing.md}>
-              <SectionLabel text="LOGGED SO FAR" />
-              {state.entries.map((e) => {
-                const drill = state.drills.find((d) => d.id === e.drillId);
+          {adhoc.length > 0 ? (
+            <YStack marginTop={spacing.md} gap={spacing.sm}>
+              <SectionLabel text="AD-HOC" />
+              {adhoc.map((entry) => {
+                const drill = state.drills.find((d) => d.id === entry.drillId);
                 return (
-                  <XStack
-                    key={e.id}
-                    alignItems="center"
-                    justifyContent="space-between"
-                    paddingVertical={spacing.sm}
-                    borderBottomWidth={1}
-                    borderBottomColor={colors.surfaceHi}
-                  >
-                    <Text style={[typography.body, { flex: 1 }]}>{drill?.name ?? 'Drill'}</Text>
-                    <Text
-                      style={[
-                        typography.body,
-                        { color: colors.textSecondary, fontVariant: ['tabular-nums'] },
-                      ]}
-                    >
-                      {drill?.metric === 'accuracy'
-                        ? `${e.value} / ${e.attempted ?? '?'}`
-                        : drill?.metric === 'duration'
-                        ? formatMmSs(e.value)
-                        : `${e.value} ${unitForMetric(drill?.metric ?? 'reps')}`}
-                    </Text>
-                  </XStack>
+                  <AdHocEntryRow
+                    key={entry.id}
+                    entry={entry}
+                    drill={drill}
+                    onPick={() => onPickEntry(entry.id)}
+                  />
                 );
               })}
             </YStack>
@@ -490,6 +487,120 @@ function EntryHeader({
       <Text style={[typography.label, { color: stateAccent ?? colors.accent }]}>{eyebrow}</Text>
       <Text style={[typography.title, { marginTop: spacing.xs }]}>{drill.name}</Text>
     </YStack>
+  );
+}
+
+function EntryValueText({
+  entry,
+  metric,
+  testID,
+}: {
+  entry: { value: number; attempted: number | null };
+  metric: Drill['metric'];
+  testID?: string;
+}) {
+  return (
+    <Text
+      testID={testID}
+      style={[typography.body, { color: colors.textSecondary, fontVariant: ['tabular-nums'] }]}
+    >
+      {formatEntryValue(entry, metric)}
+    </Text>
+  );
+}
+
+type DeleteMode = 'empty' | 'filled' | 'confirm';
+
+function RowDeleteButton({
+  mode,
+  testID,
+  onPress,
+}: {
+  mode: DeleteMode;
+  testID: string;
+  onPress: () => void;
+}) {
+  const label = mode === 'confirm' ? 'Confirm' : 'Delete';
+  const color = mode === 'empty' ? colors.textSecondary : colors.danger;
+  return (
+    <Pressable testID={testID} onPress={onPress} style={deleteButtonStyle}>
+      <Text style={[typography.label, { color }]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function PlannedSlotRow({
+  rowKey,
+  slot,
+  drill,
+  armed,
+  onPick,
+  onArmDelete,
+  onConfirmDelete,
+  onRemoveEmpty,
+}: {
+  rowKey: string;
+  slot: PlannedSlot;
+  drill: Drill | undefined;
+  armed: boolean;
+  onPick: () => void;
+  onArmDelete: () => void;
+  onConfirmDelete: () => void;
+  onRemoveEmpty: () => void;
+}) {
+  const filled = slot.entry != null;
+  const deleteMode: DeleteMode = !filled ? 'empty' : armed ? 'confirm' : 'filled';
+  const deleteTestID =
+    deleteMode === 'confirm'
+      ? `planned-slot-${rowKey}-delete-confirm`
+      : `planned-slot-${rowKey}-delete`;
+  const onDeletePress =
+    deleteMode === 'empty' ? onRemoveEmpty : deleteMode === 'confirm' ? onConfirmDelete : onArmDelete;
+  const trailing =
+    filled && slot.entry ? (
+      <EntryValueText
+        entry={slot.entry}
+        metric={drill?.metric ?? 'reps'}
+        testID={`planned-slot-${rowKey}-value`}
+      />
+    ) : undefined;
+  return (
+    <XStack alignItems="center" gap={spacing.md}>
+      <View flex={1}>
+        <Row
+          testID={`planned-slot-${rowKey}`}
+          title={drill?.name ?? 'Drill'}
+          trailing={trailing}
+          onPress={onPick}
+        />
+      </View>
+      <RowDeleteButton mode={deleteMode} testID={deleteTestID} onPress={onDeletePress} />
+    </XStack>
+  );
+}
+
+function AdHocEntryRow({
+  entry,
+  drill,
+  onPick,
+}: {
+  entry: DrillEntry;
+  drill: Drill | undefined;
+  onPick: () => void;
+}) {
+  return (
+    <Row
+      testID={`adhoc-entry-${entry.id}`}
+      title={drill?.name ?? 'Drill'}
+      trailing={
+        <EntryValueText
+          entry={entry}
+          metric={drill?.metric ?? 'reps'}
+          testID={`adhoc-entry-${entry.id}-value`}
+        />
+      }
+      onPress={onPick}
+    />
   );
 }
 

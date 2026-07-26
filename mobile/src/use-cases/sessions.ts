@@ -153,3 +153,31 @@ export async function logEntry(
   return row;
 }
 
+export async function updateEntry(
+  db: Db,
+  entryId: string,
+  input: { value: number; attempted?: number | null; now?: Clock }
+): Promise<void> {
+  const now = (input.now ?? defaultClock)().toISOString();
+  await db
+    .update(drillEntries)
+    .set({
+      value: input.value,
+      attempted: input.attempted ?? null,
+      updatedAt: now,
+    })
+    .where(eq(drillEntries.id, entryId));
+}
+
+export async function deleteEntry(
+  db: Db,
+  entryId: string,
+  opts: { now?: Clock } = {}
+): Promise<void> {
+  const now = (opts.now ?? defaultClock)().toISOString();
+  await db
+    .update(drillEntries)
+    .set({ deletedAt: now, updatedAt: now })
+    .where(eq(drillEntries.id, entryId));
+}
+
