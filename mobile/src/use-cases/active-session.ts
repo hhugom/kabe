@@ -33,18 +33,19 @@ export type EntryDraft =
   | { kind: 'accuracy'; value: string; attempted: string }
   | { kind: 'duration' };
 
+// Per-item set of slot indices the user removed via empty-row Delete.
+// In-memory only: sessions are ephemeral and the picker is the only reader.
+type RemovedSlots = Map<string, Set<number>>;
+
 export type ActiveSessionState = {
   session: Session;
   entries: DrillEntry[];
   drills: Drill[];
   plannedItems: RoutineItem[];
-  skippedItemIds: Set<string>;
-  // Per-slot removal keyed as `${itemId}#${slotIndex}` — an in-memory drop that
-  // the fused list respects. Empty-row Delete on the picker adds a key here.
-  removedSlotKeys: Set<string>;
+  removedSlots: RemovedSlots;
   pickedDrill: Drill | null;
   draft: EntryDraft | null;
-  editingEntryId?: string;
+  editingEntryId: string | null;
 };
 
 export async function hydrate(db: Db): Promise<ActiveSessionState | null> {
@@ -61,19 +62,17 @@ export async function hydrate(db: Db): Promise<ActiveSessionState | null> {
     entries: active.entries,
     drills: allDrills,
     plannedItems,
-    skippedItemIds: new Set(),
-    removedSlotKeys: new Set(),
+    removedSlots: new Map(),
     pickedDrill: null,
     draft: null,
+    editingEntryId: null,
   };
 }
 
 export function pickDrill(state: ActiveSessionState, drillId: string): ActiveSessionState {
   const drill = state.drills.find((d) => d.id === drillId);
   if (!drill) return state;
-  const next = { ...state, pickedDrill: drill, draft: draftForMetric(drill) };
-  delete next.editingEntryId;
-  return next;
+  return { ...state, pickedDrill: drill, draft: draftForMetric(drill), editingEntryId: null };
 }
 
 export function pickEntry(state: ActiveSessionState, entryId: string): ActiveSessionState {
@@ -89,10 +88,12 @@ export function pickEntry(state: ActiveSessionState, entryId: string): ActiveSes
   };
 }
 
+export function pickSlot(state: ActiveSessionState, slot: PlannedSlot): ActiveSessionState {
+  return slot.entry ? pickEntry(state, slot.entry.id) : pickDrill(state, slot.drillId);
+}
+
 export function cancelEntry(state: ActiveSessionState): ActiveSessionState {
-  const next = { ...state, pickedDrill: null, draft: null };
-  delete next.editingEntryId;
-  return next;
+  return { ...state, pickedDrill: null, draft: null, editingEntryId: null };
 }
 
 export function updateDraftValue(state: ActiveSessionState, value: string): ActiveSessionState {
@@ -174,19 +175,6 @@ export async function endActiveSession(
   await endSession(db, state.session.id, { now: opts.now });
 }
 
-export function skipPlannedItem(
-  state: ActiveSessionState,
-  itemId: string
-): ActiveSessionState {
-  const next = new Set(state.skippedItemIds);
-  next.add(itemId);
-  return { ...state, skippedItemIds: next };
-}
-
-export function visiblePlannedItems(state: ActiveSessionState): RoutineItem[] {
-  return state.plannedItems.filter((i) => !state.skippedItemIds.has(i.id));
-}
-
 export type PlannedSlot = {
   itemId: string;
   drillId: string;
@@ -194,16 +182,20 @@ export type PlannedSlot = {
   entry: DrillEntry | null;
 };
 
+function groupEntriesByDrill(entries: DrillEntry[]): Map<string, DrillEntry[]> {
+  const out = new Map<string, DrillEntry[]>();
+  for (const e of entries) {
+    const bucket = out.get(e.drillId) ?? [];
+    bucket.push(e);
+    out.set(e.drillId, bucket);
+  }
+  return out;
+}
+
 export function adHocEntries(state: ActiveSessionState): DrillEntry[] {
   const claimed = new Set<string>();
-  const entriesByDrill = new Map<string, DrillEntry[]>();
-  for (const e of state.entries) {
-    const bucket = entriesByDrill.get(e.drillId) ?? [];
-    bucket.push(e);
-    entriesByDrill.set(e.drillId, bucket);
-  }
+  const entriesByDrill = groupEntriesByDrill(state.entries);
   for (const item of state.plannedItems) {
-    if (state.skippedItemIds.has(item.id)) continue;
     const quota = item.plannedSets ?? 1;
     const entries = entriesByDrill.get(item.drillId) ?? [];
     for (let i = 0; i < quota; i++) {
@@ -215,18 +207,13 @@ export function adHocEntries(state: ActiveSessionState): DrillEntry[] {
 
 export function plannedSlots(state: ActiveSessionState): PlannedSlot[] {
   const out: PlannedSlot[] = [];
-  const entriesByDrill = new Map<string, DrillEntry[]>();
-  for (const e of state.entries) {
-    const bucket = entriesByDrill.get(e.drillId) ?? [];
-    bucket.push(e);
-    entriesByDrill.set(e.drillId, bucket);
-  }
+  const entriesByDrill = groupEntriesByDrill(state.entries);
   for (const item of state.plannedItems) {
-    if (state.skippedItemIds.has(item.id)) continue;
     const quota = item.plannedSets ?? 1;
     const entries = entriesByDrill.get(item.drillId) ?? [];
+    const removed = state.removedSlots.get(item.id);
     for (let i = 0; i < quota; i++) {
-      if (state.removedSlotKeys.has(slotKey(item.id, i))) continue;
+      if (removed?.has(i)) continue;
       out.push({
         itemId: item.id,
         drillId: item.drillId,
@@ -236,10 +223,6 @@ export function plannedSlots(state: ActiveSessionState): PlannedSlot[] {
     }
   }
   return out;
-}
-
-export function slotKey(itemId: string, slotIndex: number): string {
-  return `${itemId}#${slotIndex}`;
 }
 
 export async function deleteEntryAndRefresh(
@@ -257,13 +240,12 @@ export function removePlannedSlot(
   itemId: string,
   slotIndex: number
 ): ActiveSessionState {
-  const next = new Set(state.removedSlotKeys);
-  next.add(slotKey(itemId, slotIndex));
-  return { ...state, removedSlotKeys: next };
-}
-
-export function loggedCountForDrill(state: ActiveSessionState, drillId: string): number {
-  return state.entries.filter((e) => e.drillId === drillId).length;
+  const next = new Map(state.removedSlots);
+  const existing = next.get(itemId);
+  const updated = new Set(existing ?? []);
+  updated.add(slotIndex);
+  next.set(itemId, updated);
+  return { ...state, removedSlots: next };
 }
 
 export function canSaveDraft(state: ActiveSessionState): boolean {

@@ -5,6 +5,7 @@ import { AppState, Pressable, ScrollView, TextInput } from 'react-native';
 import { Text, View, XStack, YStack } from 'tamagui';
 import { AddADrillSheet } from '../components/AddADrillSheet';
 import { AppButton } from '../components/AppButton';
+import { Row } from '../components/Row';
 import { Screen } from '../components/Screen';
 import { SessionMenuSheet } from '../components/SessionMenuSheet';
 import { getAppDb } from '../db/client';
@@ -18,8 +19,10 @@ import {
   deleteEntryAndRefresh,
   endActiveSession,
   hydrate,
+  PlannedSlot,
   pickDrill,
   pickEntry,
+  pickSlot,
   plannedSlots,
   removePlannedSlot,
   saveDurationEntry,
@@ -28,6 +31,7 @@ import {
   updateDraftValue,
 } from '../use-cases/active-session';
 import { Drill } from '../use-cases/drills';
+import type { DrillEntry } from '../use-cases/sessions';
 
 type Props = NativeStackScreenProps<RootStackParamList, 'InSession'> & {
   clock?: () => Date;
@@ -47,11 +51,14 @@ function unitForMetric(metric: Drill['metric']): string {
   return '';
 }
 
+// Delete lives in its own tap region beside the row's primary surface. Per
+// ergonomic-minima § destructive-adjacent, either ≥24 dp gap OR "visually
+// distinct region" is required — the danger-coloured label plus the outer
+// XStack gap keeps this on the right side of both.
 const deleteButtonStyle = {
   minHeight: 56,
   minWidth: 56,
   paddingHorizontal: spacing.md,
-  marginLeft: spacing.sm,
   alignItems: 'center' as const,
   justifyContent: 'center' as const,
 };
@@ -122,6 +129,18 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
   function onPickEntry(entryId: string) {
     setTimerStartedAt(null);
     setState((s) => (s ? pickEntry(s, entryId) : s));
+  }
+
+  function onPickSlot(slot: PlannedSlot) {
+    setTimerStartedAt(null);
+    setState((s) => (s ? pickSlot(s, slot) : s));
+  }
+
+  async function onConfirmDeleteEntry(entryId: string) {
+    if (!state) return;
+    setPendingDeleteEntryId(null);
+    const next = await deleteEntryAndRefresh(state, getAppDb(), entryId, { now: clock });
+    setState(next);
   }
 
   function onCancelEntry() {
@@ -324,92 +343,27 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
               {slots.map((slot) => {
                 const drill = state.drills.find((d) => d.id === slot.drillId);
                 const rowKey = `${slot.itemId}-${slot.slotIndex}`;
-                const filled = slot.entry != null;
+                const armed = slot.entry != null && pendingDeleteEntryId === slot.entry.id;
                 return (
-                  <Pressable
+                  <PlannedSlotRow
                     key={rowKey}
-                    testID={`planned-slot-${rowKey}`}
-                    onPress={() => {
-                      if (slot.entry) onPickEntry(slot.entry.id);
-                      else if (drill) onPickDrill(drill.id);
-                    }}
-                    style={({ pressed }) => [
-                      {
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        backgroundColor: colors.surface,
-                        borderRadius: radius.md,
-                        borderWidth: 1,
-                        borderColor: colors.surfaceHi,
-                        padding: spacing.lg,
-                      },
-                      pressed ? { backgroundColor: colors.surfaceHi } : null,
-                    ]}
-                  >
-                    <YStack flex={1}>
-                      <Text style={typography.title}>{drill?.name ?? 'Drill'}</Text>
-                    </YStack>
-                    {filled && slot.entry ? (
-                      <Text
-                        testID={`planned-slot-${rowKey}-value`}
-                        style={[
-                          typography.body,
-                          { color: colors.textSecondary, fontVariant: ['tabular-nums'] },
-                        ]}
-                      >
-                        {formatEntryValue(slot.entry, drill?.metric ?? 'reps')}
-                      </Text>
-                    ) : null}
-                    {filled && slot.entry ? (
-                      pendingDeleteEntryId === slot.entry.id ? (
-                        <Pressable
-                          testID={`planned-slot-${rowKey}-delete-confirm`}
-                          onPress={async () => {
-                            const entryId = slot.entry!.id;
-                            setPendingDeleteEntryId(null);
-                            const next = await deleteEntryAndRefresh(
-                              state,
-                              getAppDb(),
-                              entryId,
-                              { now: clock }
-                            );
-                            setState(next);
-                          }}
-                          style={deleteButtonStyle}
-                        >
-                          <Text style={[typography.label, { color: colors.danger }]}>
-                            Confirm
-                          </Text>
-                        </Pressable>
-                      ) : (
-                        <Pressable
-                          testID={`planned-slot-${rowKey}-delete`}
-                          onPress={() =>
-                            slot.entry && setPendingDeleteEntryId(slot.entry.id)
-                          }
-                          style={deleteButtonStyle}
-                        >
-                          <Text style={[typography.label, { color: colors.textSecondary }]}>
-                            Delete
-                          </Text>
-                        </Pressable>
+                    rowKey={rowKey}
+                    slot={slot}
+                    drill={drill}
+                    armed={armed}
+                    onPick={() => onPickSlot(slot)}
+                    onArmDelete={() =>
+                      slot.entry && setPendingDeleteEntryId(slot.entry.id)
+                    }
+                    onConfirmDelete={() =>
+                      slot.entry && onConfirmDeleteEntry(slot.entry.id)
+                    }
+                    onRemoveEmpty={() =>
+                      setState((s) =>
+                        s ? removePlannedSlot(s, slot.itemId, slot.slotIndex) : s
                       )
-                    ) : (
-                      <Pressable
-                        testID={`planned-slot-${rowKey}-delete`}
-                        onPress={() =>
-                          setState((s) =>
-                            s ? removePlannedSlot(s, slot.itemId, slot.slotIndex) : s
-                          )
-                        }
-                        style={deleteButtonStyle}
-                      >
-                        <Text style={[typography.label, { color: colors.textSecondary }]}>
-                          Delete
-                        </Text>
-                      </Pressable>
-                    )}
-                  </Pressable>
+                    }
+                  />
                 );
               })}
             </YStack>
@@ -421,36 +375,12 @@ export function InSessionScreen({ navigation, clock = defaultClock }: Props) {
               {adhoc.map((entry) => {
                 const drill = state.drills.find((d) => d.id === entry.drillId);
                 return (
-                  <Pressable
+                  <AdHocEntryRow
                     key={entry.id}
-                    testID={`adhoc-entry-${entry.id}`}
-                    onPress={() => onPickEntry(entry.id)}
-                    style={({ pressed }) => [
-                      {
-                        flexDirection: 'row',
-                        alignItems: 'center',
-                        backgroundColor: colors.surface,
-                        borderRadius: radius.md,
-                        borderWidth: 1,
-                        borderColor: colors.surfaceHi,
-                        padding: spacing.lg,
-                      },
-                      pressed ? { backgroundColor: colors.surfaceHi } : null,
-                    ]}
-                  >
-                    <YStack flex={1}>
-                      <Text style={typography.title}>{drill?.name ?? 'Drill'}</Text>
-                    </YStack>
-                    <Text
-                      testID={`adhoc-entry-${entry.id}-value`}
-                      style={[
-                        typography.body,
-                        { color: colors.textSecondary, fontVariant: ['tabular-nums'] },
-                      ]}
-                    >
-                      {formatEntryValue(entry, drill?.metric ?? 'reps')}
-                    </Text>
-                  </Pressable>
+                    entry={entry}
+                    drill={drill}
+                    onPick={() => onPickEntry(entry.id)}
+                  />
                 );
               })}
             </YStack>
@@ -501,6 +431,120 @@ function EntryHeader({
       <Text style={[typography.label, { color: stateAccent ?? colors.accent }]}>{eyebrow}</Text>
       <Text style={[typography.title, { marginTop: spacing.xs }]}>{drill.name}</Text>
     </YStack>
+  );
+}
+
+function EntryValueText({
+  entry,
+  metric,
+  testID,
+}: {
+  entry: { value: number; attempted: number | null };
+  metric: Drill['metric'];
+  testID?: string;
+}) {
+  return (
+    <Text
+      testID={testID}
+      style={[typography.body, { color: colors.textSecondary, fontVariant: ['tabular-nums'] }]}
+    >
+      {formatEntryValue(entry, metric)}
+    </Text>
+  );
+}
+
+type DeleteMode = 'empty' | 'filled' | 'confirm';
+
+function RowDeleteButton({
+  mode,
+  testID,
+  onPress,
+}: {
+  mode: DeleteMode;
+  testID: string;
+  onPress: () => void;
+}) {
+  const label = mode === 'confirm' ? 'Confirm' : 'Delete';
+  const color = mode === 'empty' ? colors.textSecondary : colors.danger;
+  return (
+    <Pressable testID={testID} onPress={onPress} style={deleteButtonStyle}>
+      <Text style={[typography.label, { color }]}>{label}</Text>
+    </Pressable>
+  );
+}
+
+function PlannedSlotRow({
+  rowKey,
+  slot,
+  drill,
+  armed,
+  onPick,
+  onArmDelete,
+  onConfirmDelete,
+  onRemoveEmpty,
+}: {
+  rowKey: string;
+  slot: PlannedSlot;
+  drill: Drill | undefined;
+  armed: boolean;
+  onPick: () => void;
+  onArmDelete: () => void;
+  onConfirmDelete: () => void;
+  onRemoveEmpty: () => void;
+}) {
+  const filled = slot.entry != null;
+  const deleteMode: DeleteMode = !filled ? 'empty' : armed ? 'confirm' : 'filled';
+  const deleteTestID =
+    deleteMode === 'confirm'
+      ? `planned-slot-${rowKey}-delete-confirm`
+      : `planned-slot-${rowKey}-delete`;
+  const onDeletePress =
+    deleteMode === 'empty' ? onRemoveEmpty : deleteMode === 'confirm' ? onConfirmDelete : onArmDelete;
+  const trailing =
+    filled && slot.entry ? (
+      <EntryValueText
+        entry={slot.entry}
+        metric={drill?.metric ?? 'reps'}
+        testID={`planned-slot-${rowKey}-value`}
+      />
+    ) : undefined;
+  return (
+    <XStack alignItems="center" gap={spacing.md}>
+      <View flex={1}>
+        <Row
+          testID={`planned-slot-${rowKey}`}
+          title={drill?.name ?? 'Drill'}
+          trailing={trailing}
+          onPress={onPick}
+        />
+      </View>
+      <RowDeleteButton mode={deleteMode} testID={deleteTestID} onPress={onDeletePress} />
+    </XStack>
+  );
+}
+
+function AdHocEntryRow({
+  entry,
+  drill,
+  onPick,
+}: {
+  entry: DrillEntry;
+  drill: Drill | undefined;
+  onPick: () => void;
+}) {
+  return (
+    <Row
+      testID={`adhoc-entry-${entry.id}`}
+      title={drill?.name ?? 'Drill'}
+      trailing={
+        <EntryValueText
+          entry={entry}
+          metric={drill?.metric ?? 'reps'}
+          testID={`adhoc-entry-${entry.id}-value`}
+        />
+      }
+      onPress={onPick}
+    />
   );
 }
 

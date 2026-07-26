@@ -7,17 +7,15 @@ import {
   deleteEntryAndRefresh,
   endActiveSession,
   hydrate,
-  loggedCountForDrill,
   pickDrill,
   pickEntry,
+  pickSlot,
   plannedSlots,
   removePlannedSlot,
   saveDurationEntry,
   saveEntry,
-  skipPlannedItem,
   updateDraftAttempted,
   updateDraftValue,
-  visiblePlannedItems,
 } from './active-session';
 import { createRoutine } from './routines';
 import { logEntry, startSession } from './sessions';
@@ -85,7 +83,8 @@ describe('hydrate', () => {
     expect(state!.plannedItems).toEqual([]);
     expect(state!.pickedDrill).toBeNull();
     expect(state!.draft).toBeNull();
-    expect(state!.skippedItemIds).toEqual(new Set());
+    expect(state!.editingEntryId).toBeNull();
+    expect(state!.removedSlots).toEqual(new Map());
   });
 
   it('loads plannedItems in position order when the session was launched from a routine', async () => {
@@ -328,47 +327,6 @@ describe('saveDurationEntry', () => {
   });
 });
 
-describe('skipPlannedItem + visiblePlannedItems', () => {
-  it('hides the skipped item from visiblePlannedItems, others unchanged', async () => {
-    const db = createTestDb();
-    const dA = await insertDrill(db, { name: 'A', metric: 'reps' });
-    const dB = await insertDrill(db, { name: 'B', metric: 'reps' });
-    const routine = await createRoutine(db, {
-      name: 'Warmup',
-      items: [
-        { drillId: dA, plannedSets: 3 },
-        { drillId: dB, plannedSets: 1 },
-      ],
-      now: clock,
-    });
-    await startSession(db, { routineId: routine.id, now: clock });
-    const state = (await hydrate(db))!;
-    const firstItemId = state.plannedItems[0].id;
-
-    const next = skipPlannedItem(state, firstItemId);
-
-    expect(visiblePlannedItems(next).map((i) => i.id)).toEqual([state.plannedItems[1].id]);
-    expect(next.drills.map((d) => d.id).sort()).toEqual([dA, dB].sort());
-  });
-});
-
-describe('loggedCountForDrill', () => {
-  it('counts entries for a drill in the active session', async () => {
-    const db = createTestDb();
-    const session = await startSession(db, { now: clock });
-    const dA = await insertDrill(db, { metric: 'reps' });
-    const dB = await insertDrill(db, { metric: 'reps' });
-    await logEntry(db, { sessionId: session.id, drillId: dA, value: 1, now: clock });
-    await logEntry(db, { sessionId: session.id, drillId: dA, value: 2, now: clock });
-    await logEntry(db, { sessionId: session.id, drillId: dB, value: 3, now: clock });
-    const state = (await hydrate(db))!;
-
-    expect(loggedCountForDrill(state, dA)).toBe(2);
-    expect(loggedCountForDrill(state, dB)).toBe(1);
-    expect(loggedCountForDrill(state, 'missing')).toBe(0);
-  });
-});
-
 describe('plannedSlots', () => {
   it('fills slots with entries for that drill in chronological order; overflow entries do not fill', async () => {
     const db = createTestDb();
@@ -562,10 +520,50 @@ describe('saveEntry when editing', () => {
 
     expect(next.pickedDrill).toBeNull();
     expect(next.draft).toBeNull();
-    expect(next.editingEntryId).toBeUndefined();
+    expect(next.editingEntryId).toBeNull();
     expect(next.entries.length).toBe(1);
     expect(next.entries[0].id).toBe(originalEntryId);
     expect(next.entries[0].value).toBe(77);
+  });
+});
+
+describe('pickSlot', () => {
+  it('routes an empty slot into pickDrill mode', async () => {
+    const db = createTestDb();
+    const d = await insertDrill(db, { name: 'Wall rally', metric: 'reps' });
+    const routine = await createRoutine(db, {
+      name: 'W',
+      items: [{ drillId: d, plannedSets: 2 }],
+      now: clock,
+    });
+    await startSession(db, { routineId: routine.id, now: clock });
+    const state = (await hydrate(db))!;
+    const [emptySlot] = plannedSlots(state);
+
+    const next = pickSlot(state, emptySlot);
+
+    expect(next.pickedDrill?.id).toBe(d);
+    expect(next.editingEntryId).toBeNull();
+  });
+
+  it('routes a filled slot into pickEntry (edit) mode', async () => {
+    const db = createTestDb();
+    const d = await insertDrill(db, { name: 'Wall rally', metric: 'reps' });
+    const routine = await createRoutine(db, {
+      name: 'W',
+      items: [{ drillId: d, plannedSets: 1 }],
+      now: clock,
+    });
+    const session = await startSession(db, { routineId: routine.id, now: clock });
+    await logEntry(db, { sessionId: session.id, drillId: d, value: 42, now: clock });
+    const state = (await hydrate(db))!;
+    const [filledSlot] = plannedSlots(state);
+
+    const next = pickSlot(state, filledSlot);
+
+    expect(next.pickedDrill?.id).toBe(d);
+    expect(next.editingEntryId).toBe(filledSlot.entry!.id);
+    expect(next.draft).toEqual({ kind: 'reps', value: '42' });
   });
 });
 
