@@ -1,8 +1,9 @@
 import type { NativeStackScreenProps } from '@react-navigation/native-stack';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { AppButton } from '../components/AppButton';
 import { Icon } from '../components/Icon';
+import { RoutineMenuSheet } from '../components/RoutineMenuSheet';
 import { Screen } from '../components/Screen';
 import { getAppDb } from '../db/client';
 import type { RootStackParamList } from '../navigation/types';
@@ -27,6 +28,20 @@ export function RoutineEditorScreen({ navigation, route }: Props) {
   const [items, setItems] = useState<DraftItem[]>([]);
   const [drills, setDrills] = useState<Drill[]>([]);
   const [loaded, setLoaded] = useState(!isEdit);
+  const [menuOpen, setMenuOpen] = useState(false);
+  // Monotonic key generator for freshly-added draft rows. `prev.length` was not
+  // safe: after a remove-then-add, the new row could reuse the survivor's key
+  // and collide (React "same key" warning + collapsed rendering).
+  const nextKeyRef = useRef(0);
+
+  // Header three-dot visibility per navigation-surface.md § Header-icon
+  // affordance: create mode publishes no handler → PillHeader hides the icon;
+  // edit mode publishes onMenuPress → icon appears and opens the sheet.
+  useEffect(() => {
+    if (isEdit) {
+      navigation.setOptions({ onMenuPress: () => setMenuOpen(true) } as any);
+    }
+  }, [isEdit, navigation]);
 
   useEffect(() => {
     const db = getAppDb();
@@ -51,10 +66,8 @@ export function RoutineEditorScreen({ navigation, route }: Props) {
   }, [routineId, navigation]);
 
   function addDrill(drillId: string) {
-    setItems((prev) => [
-      ...prev,
-      { key: `new-${prev.length}-${drillId}`, drillId, plannedSets: null },
-    ]);
+    const key = `new-${nextKeyRef.current++}-${drillId}`;
+    setItems((prev) => [...prev, { key, drillId, plannedSets: null }]);
   }
 
   function setPlannedSets(key: string, text: string) {
@@ -184,18 +197,17 @@ export function RoutineEditorScreen({ navigation, route }: Props) {
       </ScrollView>
       <View style={styles.footer}>
         <AppButton title="Save" onPress={save} size="lg" disabled={!canSave} />
-        {isEdit ? (
-          <AppButton
-            title="Archive routine"
-            variant="danger"
-            onPress={async () => {
-              if (!routineId) return;
-              await archiveRoutine(getAppDb(), routineId);
-              navigation.goBack();
-            }}
-          />
-        ) : null}
       </View>
+      <RoutineMenuSheet
+        open={menuOpen}
+        onOpenChange={setMenuOpen}
+        onArchive={async () => {
+          if (!routineId) return;
+          setMenuOpen(false);
+          await archiveRoutine(getAppDb(), routineId);
+          navigation.goBack();
+        }}
+      />
     </Screen>
   );
 }
