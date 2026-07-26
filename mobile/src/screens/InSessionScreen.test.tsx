@@ -1,3 +1,18 @@
+// RN Modal is proven in ModalLayout.test.tsx; here we render children inline
+// when `visible` is true so the unfilled-slots modal's actions become queryable.
+// Also capture onRequestClose so tests can simulate hardware back on Android.
+const modalProps: any[] = [];
+jest.mock('react-native/Libraries/Modal/Modal', () => {
+  const React = require('react');
+  return {
+    __esModule: true,
+    default: function MockModal(props: any) {
+      modalProps.push(props);
+      return props.visible ? React.createElement(React.Fragment, null, props.children) : null;
+    },
+  };
+});
+
 import { act, fireEvent, render } from '@testing-library/react-native';
 import { AppState } from 'react-native';
 import { TamaguiProvider } from 'tamagui';
@@ -477,5 +492,161 @@ describe('InSessionScreen — timer, wake-lock, and navigation', () => {
     await act(async () => {});
 
     expect(queryByTestId('pick-drill-w1')).toBeNull();
+  });
+});
+
+// Issue #22 — End-Session unfilled-slots modal (archetype 4). Behaviour spec is
+// in docs/conventions/primary-vs-annex.md § InSession-picker; the two backing
+// branches live in use-cases/bulk-resolve-unfilled-slots.
+describe('InSessionScreen — unfilled-slots modal at End Session', () => {
+  beforeEach(() => {
+    mockListDrills.mockReset();
+    mockGetActiveSession.mockReset();
+    mockLogEntry.mockReset();
+    mockGetRoutine.mockReset();
+    mockEndSession.mockReset();
+    mockActivateKeepAwake.mockReset();
+    mockActivateKeepAwake.mockResolvedValue(undefined);
+    mockDeactivateKeepAwake.mockReset();
+    mockLogEntry.mockResolvedValue(makeEntry());
+    mockEndSession.mockResolvedValue(undefined as any);
+    mockAddADrillSheetProps.length = 0;
+    modalProps.length = 0;
+  });
+
+  async function tapEndSessionInSheet(findByTestId: (id: string) => Promise<any>) {
+    await pressHeaderMenu();
+    await act(async () => {
+      fireEvent.press(await findByTestId('session-menu-end-session'));
+      // Give the async chain that opens the modal a tick to settle.
+      await new Promise((res) => setImmediate(res));
+    });
+  }
+
+  function seedRoutineWithUnfilled({
+    drillTarget = 20 as number | null,
+    plannedSets = 2 as number | null,
+    entries = [] as DrillEntry[],
+  } = {}) {
+    const drill = makeDrill({
+      id: 'd-1',
+      name: 'Wall rally',
+      metric: 'reps',
+      target: drillTarget,
+    });
+    mockListDrills.mockResolvedValue([drill]);
+    mockGetActiveSession.mockResolvedValue({
+      session: makeSession({ id: 'session-1', routineId: 'r-1' }),
+      entries,
+    });
+    mockGetRoutine.mockResolvedValue({
+      routine: { id: 'r-1', name: 'R', createdAt: NOW, updatedAt: NOW, deletedAt: null } as any,
+      items: [
+        {
+          id: 'ri-1',
+          routineId: 'r-1',
+          drillId: 'd-1',
+          plannedSets,
+          position: 0,
+          createdAt: NOW,
+          updatedAt: NOW,
+          deletedAt: null,
+        } as any,
+      ],
+    });
+    return drill;
+  }
+
+  it('ends the session directly when there are no unfilled planned slots', async () => {
+    // No routine → no plannedItems → no unfilled slots.
+    mockGetActiveSession.mockResolvedValue({ session: makeSession(), entries: [] });
+    mockGetRoutine.mockResolvedValue(null);
+    mockListDrills.mockResolvedValue([]);
+
+    const { findByText, findByTestId, queryByText } = await renderScreen();
+    await findByText('What are you working on?');
+
+    await tapEndSessionInSheet(findByTestId);
+
+    // Modal must NOT appear; session ends and nav.goBack() fires.
+    expect(queryByText(/complete/i)).toBeNull();
+    expect(mockEndSession).toHaveBeenCalledWith(null, 'session-1', expect.anything());
+    expect(currentNavigation!.goBack).toHaveBeenCalled();
+  });
+
+  it('opens the modal instead of ending when at least one planned slot is unfilled', async () => {
+    seedRoutineWithUnfilled();
+
+    const { findByText, findByTestId, queryByText } = await renderScreen();
+    await findByText('What are you working on?');
+
+    await tapEndSessionInSheet(findByTestId);
+
+    // Both action affordances of the modal are visible.
+    expect(await findByText(/complete to target/i)).toBeTruthy();
+    expect(await findByText(/skip all/i)).toBeTruthy();
+    // Session has NOT been ended yet.
+    expect(mockEndSession).not.toHaveBeenCalled();
+    expect(currentNavigation!.goBack).not.toHaveBeenCalled();
+    expect(queryByText('What are you working on?')).toBeTruthy();
+  });
+
+  it('Complete-to-target logs one entry per unfilled slot at the drill target, then ends the session', async () => {
+    seedRoutineWithUnfilled({ drillTarget: 20, plannedSets: 2 });
+
+    const { findByText, findByTestId } = await renderScreen();
+    await findByText('What are you working on?');
+    await tapEndSessionInSheet(findByTestId);
+
+    await act(async () => {
+      fireEvent.press(await findByText(/complete to target/i));
+      await new Promise((res) => setImmediate(res));
+    });
+
+    // 2 unfilled slots × drill.target(20) → 2 logEntry calls, both value=20.
+    expect(mockLogEntry).toHaveBeenCalledTimes(2);
+    expect(mockLogEntry.mock.calls[0][1]).toEqual(
+      expect.objectContaining({ sessionId: 'session-1', drillId: 'd-1', value: 20 })
+    );
+    expect(mockLogEntry.mock.calls[1][1]).toEqual(
+      expect.objectContaining({ sessionId: 'session-1', drillId: 'd-1', value: 20 })
+    );
+    expect(mockEndSession).toHaveBeenCalledWith(null, 'session-1', expect.anything());
+    expect(currentNavigation!.goBack).toHaveBeenCalled();
+  });
+
+  it('Skip all ends the session without logging any new entries', async () => {
+    seedRoutineWithUnfilled({ drillTarget: 20, plannedSets: 2 });
+
+    const { findByText, findByTestId } = await renderScreen();
+    await findByText('What are you working on?');
+    await tapEndSessionInSheet(findByTestId);
+
+    await act(async () => {
+      fireEvent.press(await findByText(/skip all/i));
+      await new Promise((res) => setImmediate(res));
+    });
+
+    expect(mockLogEntry).not.toHaveBeenCalled();
+    expect(mockEndSession).toHaveBeenCalledWith(null, 'session-1', expect.anything());
+    expect(currentNavigation!.goBack).toHaveBeenCalled();
+  });
+
+  it('hardware back on the modal cancels: session stays active, still on InSession', async () => {
+    seedRoutineWithUnfilled();
+
+    const { findByText, findByTestId } = await renderScreen();
+    await findByText('What are you working on?');
+    await tapEndSessionInSheet(findByTestId);
+
+    // Simulate Android hardware back — RN Modal fires onRequestClose.
+    const props = modalProps[modalProps.length - 1];
+    act(() => {
+      props.onRequestClose();
+    });
+
+    expect(mockEndSession).not.toHaveBeenCalled();
+    expect(currentNavigation!.goBack).not.toHaveBeenCalled();
+    expect(await findByText('What are you working on?')).toBeTruthy();
   });
 });
