@@ -1,6 +1,6 @@
 # Navigation surface + primary action
 
-Resolved in issue #8 (part of map #1).
+Resolved in issue #8 (part of map #1). **Revised post-#8**: the tab-bar center Start action is retired; Start-a-Session moves back to a hero card at the top of Home. Trigger was a prototype-A/B (see `mobile/src/prototypes/start-session-affordance/README.md` in git history) showing the center-overhang felt visually noisy against the flat Zwift-HUD strip. Sections marked with **Post-#8 revision** below carry the new spec; the retired center-action spec is preserved as a rejected alternative.
 
 Where the player's thumb goes for the top actions. This convention decides the tab set, tab implementation, header stance, primary-action placement, back/dismiss behavior, and the four screen archetypes every future screen builds on. Together with #5 (primary vs annex), it settles the "what belongs where" question for the whole app.
 
@@ -14,13 +14,13 @@ Tab-root goals:
 
 | Tab | Goal (per #5's rule) |
 |---|---|
-| Home | See recent practice. |
+| Home | Start a Session. |
 | Routines | Manage Routines. |
 | Stats | Review progress. |
 
-**Home's goal changed** from *"Start a Session"* (the #5 lock) to *"See recent practice"*. The Start-a-Session action moved to the tab-bar center button (see below), leaving Home without a screen-scoped primary. Home becomes an at-a-glance dashboard surface (content deferred — see Known tensions).
+**Post-#8 revision.** Home's goal reverts to *Start a Session* (the #5 lock). The hero card at the top of Home is the primary affordance; a "Recent practice" section sits below as dashboard content. Full spec below (§ Home Start hero).
 
-**Routines is a new tab-root goal**, distinct from PickRoutine's goal (see below). *Manage Routines* = the tab-root that lists routines and links to RoutineEditor and to the Drills library annex. *Start a Session* (formerly *Pick a Routine*) = the bottom-sheet picker triggered by the tab-bar center button.
+**Routines is a new tab-root goal**, distinct from PickRoutine's goal (see below). *Manage Routines* = the tab-root that lists routines and links to RoutineEditor and to the Drills library annex. *Start a Session* (formerly *Pick a Routine*) = the bottom-sheet picker triggered by the Home Start hero.
 
 ## Tab implementation
 
@@ -33,16 +33,17 @@ Visual treatment:
 - **Active-tab indicator** — M3-style active pill: a rounded filled shape wrapping the active tab's icon + label. Fill = `accentCyan`, icon + label = black (per #3's "black on cyan hits AAA" contrast note). Matches Zwift-HUD chunkiness and gives the active tab a strong visual claim.
 - **Content per tab** — icon + label together inside the pill (icon-only forces guessing; label-only loses at-glance scannability). Icons: filled/chunky per #3's HUD glyph rule (Material Symbols filled weight 500+ or Lucide filled). Final icon-set choice deferred (map #1 "Icon set" gap).
 
-## Tab-bar center action
+## Home Start hero
 
-The tab bar has a **fourth, centered slot** (visually distinct from the three navigation tabs) that acts as the Start-a-Session primary action.
+**Post-#8 revision.** The tab bar is a strict three-cell flat strip (no center action). Start-a-Session is a **hero card at the top of the Home content region** — full-width, accent-cyan fill, icon + title + eyebrow. Tab bar chrome stays flat and identical across Home / Routines / Stats.
 
-- **Presence.** Always visible on every tab. Same pixel location across Home / Routines / Stats — a persistent, muscle-memory anchor for the app's most-common action.
-- **Default state.** Filled cyan, chunky icon + "START" label (or icon-only if space forces it — icon-set decision pending). Tap → opens PickRoutine as a **bottom sheet** overlaying the current tab.
+- **Placement.** Top of Home's content region, above the "Recent practice" section. Not bottom-anchored: the hero is at-a-glance from the moment the app opens.
+- **Default state.** Accent-cyan fill, "Ready when you are" overline + "Start a session" title, play icon in a rounded well on the right. Tap → opens PickRoutine as a **bottom sheet** overlaying Home.
 - **PickRoutine sheet content.** An "Empty start" affordance at the top (starts a session with no routine), followed by the routine list. Both paths land the player in InSession.
-- **Active-session state.** When a session is active, the center button morphs: same location and shape, label becomes "RESUME", fill becomes `accentAmber`. Tap → navigates to InSession. Consequence: on tab-root screens, the amber pill from #5 is *not* rendered — the morphed center button is the affordance. Pill rendering rules narrow accordingly (see below).
+- **Active-session state.** When a session is active, the hero morphs in place: fill becomes `accentAmber`, overline becomes "Session in progress", title becomes "Resume session". Tap → navigates to InSession. Black text on amber preserves AAA contrast.
+- **Reachability from other tab-roots.** Routines and Stats have no in-content Start affordance; the amber active-session pill (see below) covers the resume path from those tabs. To *start* a new session from Routines/Stats, tap the Home tab first — Start is a Home-scoped affordance by design.
 
-Rejected alternatives to the center action are captured at the bottom of this doc.
+Retired center-action alternative (and other rejected shapes) captured at the bottom of this doc.
 
 ## Header stance
 
@@ -102,13 +103,14 @@ Android hardware back is authoritative on every surface. Top-left back on stack 
 
 **Modals ignore tap-outside.** The unfilled-slots modal requires an explicit choice (complete-to-target or skip). Tap-outside would silently cancel the End Session action if the player mis-taps. Hardware back is the only implicit dismiss, treated as equivalent to Cancel (return to the previous screen; don't end the session).
 
-## Active-session pill (updated from #5)
+## Active-session pill (updated from #5, revised post-#8)
 
-The pill spec from #5 (top of screen, immediately below status bar, full-width, `accentAmber`, tap → InSession) stands. Its **rendering rule narrows**:
+The pill spec from #5 (top of screen, immediately below status bar, full-width, `accentAmber`, tap → InSession) stands. Its **rendering rule**:
 
 | Surface | Pill? |
 |---|---|
-| Tab-root (Home, Routines, Stats) | No — center tab-bar button morphs to Resume (amber) instead |
+| Home (tab-root) | No — the Home Start hero morphs to Resume (amber) and covers the same job |
+| Routines / Stats (tab-roots) | **Pending** — v1 ships without the pill on these tab-roots; players resume by tapping Home. Adding the pill here is a candidate follow-up (see Known tensions) |
 | Stack push with RN header (RoutineEditor) | Yes — above the RN header (order: status bar → pill → header → content) |
 | Bottom sheet (PickRoutine, Add-a-drill, Session menu, Routine menu) | No on the sheet itself; whatever's underneath governs pill visibility |
 | Modal | No |
@@ -126,13 +128,14 @@ Home, Routines, Stats.
 │ [status bar]             │
 ├──────────────────────────┤
 │  Kabe                    │  ← Chrome mark (small)
-│  <in-content hero>       │  ← self-title (eyebrow + title)
+│  [ ▶  Start a session ]  │  ← Home Start hero (Home only; morphs to RESUME amber)
 │                          │
+│  RECENT PRACTICE         │  ← section label (Home; dashboard content)
 │  <content …>             │
 │                          │
 ├──────────────────────────┤
-│  ⌂    ◉ START    ≡  ▤   │  ← tab bar w/ M3 active-pill
-│ HOME  (center)  ROU STA  │    center morphs to RESUME (amber) if active
+│  ⌂        ≡        ▤     │  ← flat 3-cell tab bar w/ M3 active-pill
+│ HOME    ROUTINES  STATS  │    Routines / Stats — no in-content start affordance
 └──────────────────────────┘
 ```
 
@@ -159,7 +162,7 @@ InSession modes, RoutineEditor.
 ```
 
 ### Archetype 3 — Sheet
-PickRoutine (from center button), Add-a-drill (from InSession picker), Session menu (from InSession header-icon), Routine menu (from RoutineEditor header-icon).
+PickRoutine (from the Home Start hero), Add-a-drill (from InSession picker), Session menu (from InSession header-icon), Routine menu (from RoutineEditor header-icon).
 
 ```
 ┌──────────────────────────┐
@@ -198,13 +201,13 @@ Currently only the unfilled-slots modal at End Session. Alert/confirm dialogs (i
 
 ## Consequences for #5 (updates to primary-vs-annex.md)
 
-Three narrowings resolved by #8 that #5 didn't (couldn't) settle:
+Narrowings resolved by #8 (and revised post-#8) that #5 didn't (couldn't) settle:
 
-- **Amber active-session pill drops on tab-root screens.** The tab-bar center button morphs to Resume in amber and covers the same job. Pill still appears on stack-push-with-header (RoutineEditor).
+- **Amber active-session pill.** Absent on Home (Home Start hero morphs to Resume and covers the same job). Absent on Routines / Stats in v1 (candidate follow-up — see Known tensions). Still appears on stack-push-with-header (RoutineEditor).
 - **Header-icon menus (Session menu, Routine menu) use bottom sheet, not annex screen.** This is a #8 override of #5's default disposal rung for this specific pattern (quick-tap 1–3 item menus).
-- **Two goals change.** Home's goal shifts from *Start a Session* to *See recent practice*. PickRoutine's goal broadens from *Pick a Routine* to *Start a Session* (subsumes Empty start).
+- **PickRoutine's goal broadens** from *Pick a Routine* to *Start a Session* (subsumes Empty start). Home's goal reverts to *Start a Session* under the post-#8 revision (i.e. #5's original lock stands).
 
-`docs/conventions/primary-vs-annex.md` gets a small "Updated by #8" note in each affected section.
+`docs/conventions/primary-vs-annex.md` gets small "Updated by #8" / "Post-#8 revision" notes in each affected section.
 
 ## Consequences carried into follow-on tickets
 
@@ -214,18 +217,19 @@ Three narrowings resolved by #8 that #5 didn't (couldn't) settle:
 
 ## Known tensions (out of scope for this convention)
 
-- **Home dashboard content.** *What* Home shows (last session recap? streak? suggested routine?) is a feature question; parent map #1 says "no new features." Interim: Home renders Chrome mark + a "no recent practice" empty state until a future feature ticket specs the dashboard.
+- **Home dashboard content.** *What* Home's "Recent practice" section shows (last session recap? streak? suggested routine?) is a feature question; parent map #1 says "no new features." Interim: Home renders Chrome mark + hero + a "no recent practice" empty state until a future feature ticket specs the dashboard.
 - **Drill creation feature.** Still deferred from #5. If built, lives exclusively on the Add-a-drill sheet.
-- **Tab-bar center action + 3 nav tabs = 4 slots.** The visual balance of "3 nav tabs + 1 raised center action" is common (Strava, Nike Run Club) but non-trivial to lay out; #7's row-primitive and the tabBar component itself will need to prove the layout at build time. If the balance fails on real devices, the fallback is to re-open Q4 with the (d) bottom-anchored-buttons option.
+- **Resume affordance on Routines / Stats.** Post-#8 revision removed the persistent-anywhere resume from the tab-bar center. In v1, players resume by tapping the Home tab. Follow-up candidate: mount the amber pill on Routines / Stats when a session is active. Not done in the fold-back because it enlarges scope; flag for the next tab-root pass.
 
 ## Rejected alternatives
 
 - **Keep RN Navigation's default tab bar unchanged.** Wouldn't hit the Zwift-HUD aesthetic without heavy override. Rejected in favour of custom Tamagui tabBar hosted by RN Navigation.
 - **Adopt `react-native-paper` (Material 3) as the nav surface.** Layers a second component library on top of Tamagui — clashes with #6's "one library" decision.
-- **Bottom-anchored full-width buttons on Home for Start Session + Start from Routine (my original recommendation).** Passed over in favour of the tab-bar center action because a persistent, muscle-memory Start location beats a per-screen button; and because Home's dashboard role (see above) benefits from the space the buttons would occupy.
-- **FAB (single floating action button).** Can't cleanly represent two actions (Start Session + Start from Routine, before the redesign); needs speed-dial which adds a tap and hides the secondary path. Rejected in favour of the labeled center tab-bar action.
-- **Center action only on Home, absent on Routines / Stats.** Would make the tab bar visually reshape between tabs (jarring) and force the player to tab-back-to-Home before starting a session (erases the ergonomic win). Rejected in favour of persistent center action on every tab.
-- **Center action long-press → "start options" sheet.** Double-tap on the primary at-the-court path. Rejected in favour of tap = PickRoutine sheet (with Empty start inside).
+- **Tab-bar center Start action (the original #8 pick, retired post-#8).** A raised fourth cell in the middle of the tab strip, morphing to Resume when a session is active. Rejected on visual grounds after a prototype-A/B: the overhanging circle broke the flat Zwift-HUD strip and read as noisy chrome rather than a primary action. Replaced by the Home Start hero. The center-action's stated wins (persistent muscle-memory location, resume-anywhere) partially trade off — see the "Resume affordance on Routines / Stats" tension.
+- **Corner FAB (floating action button anchored bottom-right, above the flat tab bar).** Considered in the prototype-A/B alongside the Home hero and a 4-cell in-line tab. Rejected in favour of the Home hero because a hero card carries a title + eyebrow at-a-glance (an icon-only FAB doesn't), and because Home's dashboard role wants a titled affordance up top, not a floating icon down-right.
+- **4-cell in-line tab (Home / Routines / Stats / Start as flat siblings).** Considered in the prototype-A/B. Rejected because it dilutes the tab set's meaning (three navigation destinations + one action) and produces a Start cell that reads as a fourth destination.
+- **Bottom-anchored full-width buttons on Home for Start Session + Start from Routine (#5's original shape).** Rejected in favour of a single hero card that morphs between Start and Resume — one primary affordance rather than two side-by-side buttons; Start-from-Routine is folded into the PickRoutine sheet the hero opens.
+- **Home Start action reachable from Routines / Stats.** Considered as a mini-pill or FAB duplicated across all tab-roots. Rejected in favour of Home-scoped: duplicating the affordance dilutes it and adds chrome to Routines / Stats. Resume-from-Routines/Stats is deferred to a follow-up (see Known tensions).
 - **Icon-only tab bar.** Forces the player to guess icon meaning at-the-court. Rejected in favour of icon + label.
 - **Label-only tab bar (current).** Loses the fast at-glance affordance from thumb distance. Rejected in favour of icon + label.
 - **Underline / tint-only active indicator.** Doesn't match Zwift-HUD chunkiness. Rejected in favour of M3 active-pill.
