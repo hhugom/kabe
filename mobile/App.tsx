@@ -22,6 +22,7 @@ import migrations from './src/db/migrations';
 import type { RootStackParamList } from './src/navigation/types';
 import { PickRoutineSheet } from './src/components/PickRoutineSheet';
 import { PillHeader } from './src/components/PillHeader';
+import { SessionActionsProvider } from './src/components/session-actions';
 import { TabBar } from './src/components/TabBar';
 import { ArchetypesDemoScreen } from './src/screens/ArchetypesDemoScreen';
 import { RowsDemoScreen } from './src/screens/RowsDemoScreen';
@@ -46,18 +47,13 @@ type TabsProps = {
 function Tabs({ sessionActive, refreshSessionActive }: TabsProps) {
   const rootNav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
   const [pickerOpen, setPickerOpen] = useState(false);
+  const onStartPress = () => setPickerOpen(true);
+  const onResumePress = () => rootNav.navigate('InSession');
   return (
-    <>
+    <SessionActionsProvider value={{ sessionActive, onStartPress, onResumePress }}>
       <Tab.Navigator
         screenOptions={{ headerShown: false, tabBarHideOnKeyboard: true }}
-        tabBar={(props) => (
-          <TabBar
-            {...props}
-            sessionActive={sessionActive}
-            onStartPress={() => setPickerOpen(true)}
-            onResumePress={() => rootNav.navigate('InSession')}
-          />
-        )}
+        tabBar={(props) => <TabBar {...props} />}
       >
         <Tab.Screen name="Home" component={HomeScreen} />
         <Tab.Screen name="Routines" component={RoutinesScreen} />
@@ -72,7 +68,7 @@ function Tabs({ sessionActive, refreshSessionActive }: TabsProps) {
           rootNav.navigate('InSession');
         }}
       />
-    </>
+    </SessionActionsProvider>
   );
 }
 

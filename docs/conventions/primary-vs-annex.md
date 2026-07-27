@@ -59,8 +59,8 @@ Items on the primary surface that aren't the goal must earn admission via all th
 
 **Initial allow-list:**
 
-- **Resume-session banner on Home.** When an active session exists, Home shows a resume card in place of the Start CTA. **Updated by #8:** superseded by the tab-bar center button morph — when a session is active, the center action on every tab-root morphs to *RESUME* in amber. The separate Home resume card is no longer needed on the tab-root itself.
-- **Active-session pill on every non-InSession mode-screen while a session is running.** Top of screen, immediately below the status bar, spanning full width, in `accentAmber` (amber = "attention, but not destructive" per aesthetic-direction). Tapping navigates to InSession. **Updated by #8:** rendering rule narrows — no pill on tab-roots (center-button morph covers it), no pill on sheets or modals. Pill still appears on stack-push-with-header (RoutineEditor) above the RN header.
+- **Resume-session banner on Home.** When an active session exists, Home shows a resume card in place of the Start CTA. **Updated by #8:** superseded by the tab-bar center button morph — when a session is active, the center action on every tab-root morphs to *RESUME* in amber. **Post-#8 revision:** the resume affordance on Home is the **Home Start hero morphing to Resume** (amber fill, "Resume session" title), replacing the retired center-button morph. Same slot as the idle Start hero — one card, two states.
+- **Active-session pill on every non-InSession mode-screen while a session is running.** Top of screen, immediately below the status bar, spanning full width, in `accentAmber` (amber = "attention, but not destructive" per aesthetic-direction). Tapping navigates to InSession. **Updated by #8:** rendering rule narrows — no pill on tab-roots (center-button morph covers it), no pill on sheets or modals. Pill still appears on stack-push-with-header (RoutineEditor) above the RN header. **Post-#8 revision:** no pill on Home (hero morph covers it); no pill on Routines / Stats in v1 (players tap Home to resume — see `navigation-surface.md` § Active-session pill for the follow-up candidate).
 
 ## Screen-by-screen goals
 
@@ -78,19 +78,21 @@ The nine mode-screens in v1 and their locked goals:
 | RoutineEditor | Compose a Routine. |
 | Stats | Review progress. |
 
-**Updated by #8:** two goals revised. Home's goal shifts from *Start a Session* to *See recent practice* (Start-a-Session moved to the tab-bar center button, so Home no longer has a screen-scoped primary and becomes an at-a-glance dashboard surface). PickRoutine's goal broadens from *Pick a Routine* to *Start a Session* — it now hosts an "Empty start" affordance alongside the routine list. A new tab-root goal, *Manage Routines*, is added for the Routines tab (distinct from PickRoutine's session-launch goal). See `navigation-surface.md` § Tab set.
+**Updated by #8, revised post-#8:** #8 shifted Home's goal to *See recent practice* on the assumption that Start-a-Session lived on the tab-bar center button. The center button was retired in the post-#8 revision (see `navigation-surface.md`); Home's goal reverts to *Start a Session* (the #5 lock). The "Recent practice" section that ships on Home is dashboard content in the annex tier — an empty-state placeholder in v1, spec'd by a future feature ticket. PickRoutine's goal still broadens from *Pick a Routine* to *Start a Session* (it hosts the "Empty start" affordance alongside the routine list); Routines still has its new *Manage Routines* tab-root goal.
 
 ## Worked examples
 
-### Home — goal: *Start a Session*
+### Home — goal: *Start a Session* (post-#8 revision)
 
 | Item | Bucket | Destination |
 |---|---|---|
 | "Kabe" title | Chrome | Stays — minimal branding mark |
 | "Solo tennis, tracked." tagline | Annex, no player-question | **Removed** |
-| Start Session button | Primary | Stays |
-| Start from Routine button | Primary (same-goal alternative path) | Stays |
-| Resume Session card | Allow-listed | Stays; amber treatment per allow-list spec |
+| Home Start hero (accent-cyan card, "Start a session") | Primary | Stays — the single Start affordance; opens PickRoutine sheet |
+| Home Start hero, active state (amber, "Resume session") | Allow-listed (per allow-list § Resume-session banner) | Stays — same slot as idle, amber morph |
+| "Recent practice" section (dashboard content, empty state in v1) | Annex tier / dashboard content | Stays — placeholder until a feature ticket specs the block |
+
+The Start-from-Routine alternative path from #5 collapses into the PickRoutine sheet the hero opens (routine rows are the same-goal alternative to Empty start).
 
 ### InSession-picker — goal: *Pick a Drill*
 
@@ -162,7 +164,7 @@ These are real IA smells surfaced during grilling but deliberately not fixed her
   - Fused planned-slot list on InSession-picker (per-set rows, empty/filled states, ad-hoc second section, per-row Delete with confirm on filled).
   - Unfilled-slots modal on End Session (bulk complete-to-target / skip). Backing use-case does not yet exist; flag as prerequisite before UI ships.
   - Amber active-session pill component: top of screen, full width, tap → InSession.
-  - Home resume card in place of Start CTA when active session exists.
+  - Home Start hero: single accent-cyan card at the top of Home hosting the Start-a-Session primary; morphs to Resume (amber, "Resume session") when an active session exists. See `navigation-surface.md` § Home Start hero.
 - **#7 (canonical row primitive)** must serve at least: drill cards (Drills / Add-a-drill / PickRoutine row types), fused-slot rows (empty and filled states, per-row Delete affordance), routine list rows.
 - **#8 (navigation surface + primary action)** decides Routines-vs-Drills top-level placement (Routines is the recommended top-level surface, Drills becomes annex from Routines) and specifies the header-icon affordance pattern used by Session menu and Routine menu.
 
