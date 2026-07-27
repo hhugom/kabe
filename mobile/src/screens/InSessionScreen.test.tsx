@@ -13,10 +13,11 @@ jest.mock('react-native/Libraries/Modal/Modal', () => {
   };
 });
 
-import { act, fireEvent, render } from '@testing-library/react-native';
+import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { AppState } from 'react-native';
 import { TamaguiProvider } from 'tamagui';
 import tamaguiConfig from '../../tamagui.config';
+import { colors } from '../theme';
 import type { Drill } from '../use-cases/drills';
 import { listDrills } from '../use-cases/drills';
 import { getRoutine } from '../use-cases/routines';
@@ -742,6 +743,277 @@ describe('InSessionScreen — fused planned-slot list', () => {
   });
 });
 
+// Pressable's `style` prop is a function `({pressed}) => styles[]`. Resolve it
+// to a flat style object so tests can assert on the composed backgroundColor.
+function resolveButtonBackground(pressable: any): string | undefined {
+  const raw =
+    typeof pressable.props.style === 'function'
+      ? pressable.props.style({ pressed: false })
+      : pressable.props.style;
+  const merged = Object.assign({}, ...[].concat(raw).flat().filter(Boolean));
+  return merged.backgroundColor;
+}
+
+describe('InSessionScreen — state-driven accent on primary action (issue #25)', () => {
+  beforeEach(() => {
+    mockListDrills.mockReset();
+    mockGetActiveSession.mockReset();
+    mockLogEntry.mockReset();
+    mockGetRoutine.mockReset();
+    mockEndSession.mockReset();
+    mockUpdateEntry.mockReset();
+    mockUpdateEntry.mockResolvedValue(undefined as any);
+    mockDeleteEntry.mockReset();
+    mockDeleteEntry.mockResolvedValue(undefined as any);
+    mockActivateKeepAwake.mockReset();
+    mockActivateKeepAwake.mockResolvedValue(undefined);
+    mockDeactivateKeepAwake.mockReset();
+    mockGetActiveSession.mockResolvedValue({ session: makeSession(), entries: [] });
+    mockLogEntry.mockResolvedValue(makeEntry());
+    mockGetRoutine.mockResolvedValue(null);
+    mockEndSession.mockResolvedValue(undefined as any);
+    mockAddADrillSheetProps.length = 0;
+  });
+
+  it('reps mode hero shows the draft value and updates as the user edits it', async () => {
+    // The draft pre-fills with the drill target per PRD #25 ("default to Target
+    // when set, so I have less to type") — so hero starts at "50". The essential
+    // check is that hero tracks the *draft*, not the target: editing the input
+    // moves the hero, unlike the pre-refactor behaviour where hero was locked
+    // to `target` and never updated.
+    const drill = makeDrill({
+      id: 'reps-hero',
+      name: 'Serve reps',
+      metric: 'reps',
+      target: 50,
+    });
+    mockListDrills.mockResolvedValue([drill]);
+
+    const { findByTestId, findByText, findByLabelText } = await renderScreen();
+    fireEvent.press(await findByText('Add a drill'));
+    fireEvent.press(await findByTestId('add-a-drill-row-reps-hero'));
+
+    let hero = await findByTestId('reps-hero-readout');
+    expect(JSON.stringify(hero.props)).toMatch(/\b50\b/);
+    // heroDigits size = 112 sp per aesthetic-direction.md § Type-scale sketch.
+    expect(JSON.stringify(hero.props.style)).toMatch(/"fontSize":112/);
+
+    // Editing the input moves the hero — proves the hero reads from the draft,
+    // not from `pickedDrill.target`.
+    fireEvent.changeText(await findByLabelText('reps-input'), '37');
+    hero = await findByTestId('reps-hero-readout');
+    expect(JSON.stringify(hero.props)).toMatch(/\b37\b/);
+  });
+
+  it('reps mode renders a progress track + TARGET/REMAINING/RATE stat chips when the drill has a target', async () => {
+    const drill = makeDrill({
+      id: 'reps-t',
+      name: 'Serve reps',
+      metric: 'reps',
+      target: 50,
+    });
+    mockListDrills.mockResolvedValue([drill]);
+
+    const { findByTestId, findByText, findByLabelText, getByText } = await renderScreen();
+    fireEvent.press(await findByText('Add a drill'));
+    fireEvent.press(await findByTestId('add-a-drill-row-reps-t'));
+
+    expect(await findByTestId('reps-progress-track')).toBeTruthy();
+    // Stat chips: TARGET / REMAINING / RATE per spec.
+    expect(getByText('TARGET')).toBeTruthy();
+    expect(getByText('REMAINING')).toBeTruthy();
+    expect(getByText('RATE')).toBeTruthy();
+
+    // TARGET chip = 50 (drill target, independent literal from setup).
+    const targetChip = await findByTestId('reps-target-chip-value');
+    expect(JSON.stringify(targetChip.props)).toMatch(/\b50\b/);
+
+    // Clear the pre-filled draft (PRD #25) so REMAINING and RATE take on
+    // meaningful "in-progress" values rather than the pre-fill == target case.
+    fireEvent.changeText(await findByLabelText('reps-input'), '20');
+
+    // REMAINING = 50 - 20 = 30.
+    const remainingChip = await findByTestId('reps-remaining-chip-value');
+    expect(JSON.stringify(remainingChip.props)).toMatch(/\b30\b/);
+    // RATE = 20 / 50 = 40%.
+    const rateChip = await findByTestId('reps-rate-chip-value');
+    expect(JSON.stringify(rateChip.props)).toMatch(/40%/);
+  });
+
+  it('reps mode omits the progress track and stat chips when the drill has no target', async () => {
+    const drill = makeDrill({
+      id: 'reps-nt',
+      name: 'Serve reps',
+      metric: 'reps',
+      target: null,
+    });
+    mockListDrills.mockResolvedValue([drill]);
+
+    const { findByTestId, findByText, queryByTestId, queryByText } = await renderScreen();
+    fireEvent.press(await findByText('Add a drill'));
+    fireEvent.press(await findByTestId('add-a-drill-row-reps-nt'));
+    // Wait for reps entry mode.
+    await findByTestId('reps-hero-readout');
+
+    expect(queryByTestId('reps-progress-track')).toBeNull();
+    expect(queryByText('TARGET')).toBeNull();
+    expect(queryByText('REMAINING')).toBeNull();
+  });
+
+  it('reps Save button fill follows the state-driven accent as the draft value crosses target thresholds', async () => {
+    const drill = makeDrill({
+      id: 'reps-acc',
+      name: 'Serve reps',
+      metric: 'reps',
+      target: 100,
+    });
+    mockListDrills.mockResolvedValue([drill]);
+
+    const { findByTestId, findByText, findByLabelText } = await renderScreen();
+    fireEvent.press(await findByText('Add a drill'));
+    fireEvent.press(await findByTestId('add-a-drill-row-reps-acc'));
+
+    const input = await findByLabelText('reps-input');
+
+    // 50 / 100 = 50% → cyan (on-track).
+    fireEvent.changeText(input, '50');
+    let save = await findByTestId('primary-action');
+    expect(resolveButtonBackground(save)).toBe(colors.accent);
+
+    // 95 / 100 = 95% → amber (approaching).
+    fireEvent.changeText(input, '95');
+    save = await findByTestId('primary-action');
+    expect(resolveButtonBackground(save)).toBe(colors.accentAmber);
+
+    // 120 / 100 = 120% → magenta (over).
+    fireEvent.changeText(input, '120');
+    save = await findByTestId('primary-action');
+    expect(resolveButtonBackground(save)).toBe(colors.accentMagenta);
+  });
+
+  it('state-driven accent boundaries are inclusive at 90% (amber) and 100% (magenta)', async () => {
+    // Guards `>=` vs `>` in stateAccentFor — a flip at either edge would
+    // silently violate the aesthetic-direction thresholds.
+    const drill = makeDrill({
+      id: 'reps-bnd',
+      name: 'Serve reps',
+      metric: 'reps',
+      target: 100,
+    });
+    mockListDrills.mockResolvedValue([drill]);
+
+    const { findByTestId, findByText, findByLabelText } = await renderScreen();
+    fireEvent.press(await findByText('Add a drill'));
+    fireEvent.press(await findByTestId('add-a-drill-row-reps-bnd'));
+
+    const input = await findByLabelText('reps-input');
+
+    // 89% → still cyan (just below the 90% threshold).
+    fireEvent.changeText(input, '89');
+    expect(resolveButtonBackground(await findByTestId('primary-action'))).toBe(colors.accent);
+
+    // 90% → amber (boundary is inclusive at 0.9).
+    fireEvent.changeText(input, '90');
+    expect(resolveButtonBackground(await findByTestId('primary-action'))).toBe(colors.accentAmber);
+
+    // 99% → still amber (just below the 100% threshold).
+    fireEvent.changeText(input, '99');
+    expect(resolveButtonBackground(await findByTestId('primary-action'))).toBe(colors.accentAmber);
+
+    // 100% → magenta (boundary is inclusive at 1.0).
+    fireEvent.changeText(input, '100');
+    expect(resolveButtonBackground(await findByTestId('primary-action'))).toBe(colors.accentMagenta);
+  });
+
+  it('accuracy mode renders hero pct + progress track + TARGET/REMAINING/RATE chips; Save follows state accent', async () => {
+    const drill = makeDrill({
+      id: 'acc-1',
+      name: 'Serve accuracy',
+      metric: 'accuracy',
+      target: 80,
+    });
+    mockListDrills.mockResolvedValue([drill]);
+
+    const { findByTestId, findByText, findByLabelText } = await renderScreen();
+    fireEvent.press(await findByText('Add a drill'));
+    fireEvent.press(await findByTestId('add-a-drill-row-acc-1'));
+
+    fireEvent.changeText(await findByLabelText('accuracy-value-input'), '17');
+    fireEvent.changeText(await findByLabelText('accuracy-attempted-input'), '20');
+
+    // 17 / 20 = 85% → hero shows "85%".
+    const hero = await findByTestId('accuracy-hero-readout');
+    expect(JSON.stringify(hero.props)).toMatch(/85%/);
+    expect(await findByTestId('accuracy-progress-track')).toBeTruthy();
+
+    // TARGET chip shows the drill target (80%).
+    const targetChip = await findByTestId('accuracy-target-chip-value');
+    expect(JSON.stringify(targetChip.props)).toMatch(/80%/);
+
+    // RATE chip = pctInt% = round(85/80 * 100) = 106%.
+    const rateChip = await findByTestId('accuracy-rate-chip-value');
+    expect(JSON.stringify(rateChip.props)).toMatch(/106%/);
+
+    // 85% / 80% target = 106% → magenta.
+    const save = await findByTestId('primary-action');
+    expect(resolveButtonBackground(save)).toBe(colors.accentMagenta);
+  });
+
+  it('accuracy mode omits the progress track and stat chips when the drill has no target', async () => {
+    const drill = makeDrill({
+      id: 'acc-nt',
+      name: 'Serve accuracy',
+      metric: 'accuracy',
+      target: null,
+    });
+    mockListDrills.mockResolvedValue([drill]);
+
+    const {
+      findByTestId,
+      findByText,
+      findByLabelText,
+      queryByTestId,
+      queryByText,
+    } = await renderScreen();
+    fireEvent.press(await findByText('Add a drill'));
+    fireEvent.press(await findByTestId('add-a-drill-row-acc-nt'));
+    await findByLabelText('accuracy-value-input');
+
+    expect(queryByTestId('accuracy-progress-track')).toBeNull();
+    expect(queryByText('TARGET')).toBeNull();
+    expect(queryByText('REMAINING')).toBeNull();
+  });
+
+  it('duration Stop button switches to the magenta accent once elapsed ≥ 100% of target', async () => {
+    // Target 100 s; advance clock to 120 s → pct ≥ 1 → magenta.
+    // Aesthetic-direction § state-driven accent rule.
+    const drill = makeDrill({
+      id: 'dur-mag',
+      name: 'Wall rally',
+      metric: 'duration',
+      target: 100,
+    });
+    mockListDrills.mockResolvedValue([drill]);
+
+    let ticks = 0;
+    const clock = () => new Date(Date.parse(NOW) + ticks);
+
+    const { findByTestId, findByText } = await renderScreen({ clock });
+    fireEvent.press(await findByText('Add a drill'));
+    fireEvent.press(await findByTestId('add-a-drill-row-dur-mag'));
+
+    fireEvent.press(await findByText('Start'));
+    ticks = 120_000;
+
+    // setInterval re-renders every 500 ms; waitFor polls until the primary-
+    // action button reflects the over-target accent (magenta).
+    await waitFor(async () => {
+      const btn = await findByTestId('primary-action');
+      expect(resolveButtonBackground(btn)).toBe(colors.accentMagenta);
+    });
+  });
+});
+
 describe('InSessionScreen — unfilled-slots modal at End Session', () => {
   beforeEach(() => {
     mockListDrills.mockReset();
@@ -894,3 +1166,4 @@ describe('InSessionScreen — unfilled-slots modal at End Session', () => {
     expect(await findByText('What are you working on?')).toBeTruthy();
   });
 });
+

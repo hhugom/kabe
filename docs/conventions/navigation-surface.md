@@ -75,8 +75,8 @@ Applied per mode-screen with a discrete commit action:
 | Mode-screen | Bottom primary | Bottom cancel |
 |---|---|---|
 | InSession-picker | Add a drill (routes to Add-a-drill sheet) | — |
-| InSession-reps | Save | Cancel (ghost) |
-| InSession-accuracy | Save | Cancel (ghost) |
+| InSession-reps | Save (colour follows #3's state-driven accent) | Cancel (ghost) |
+| InSession-accuracy | Save (colour follows #3's state-driven accent) | Cancel (ghost) |
 | InSession-duration | Start / Stop (morphs on state, colour follows #3's state-driven accent) | Cancel (ghost) |
 | RoutineEditor | Save | — |
 | PickRoutine (sheet) | — (list rows are the action) | — |
