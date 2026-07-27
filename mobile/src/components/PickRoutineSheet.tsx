@@ -58,6 +58,9 @@ const styles = StyleSheet.create({
     backgroundColor: colors.surfaceHi,
     borderRadius: radius.md,
     padding: spacing.lg,
+    // Annex tap-target floor from docs/conventions/ergonomic-minima.md § Numeric floor.
+    minHeight: 48,
+    justifyContent: 'center',
   },
   rowLabel: {
     ...typography.subtitle,

@@ -149,7 +149,6 @@ export function RoutineEditorScreen({ navigation, route }: Props) {
                     testID={`move-up-${item.key}`}
                     onPress={() => move(index, -1)}
                     disabled={index === 0}
-                    hitSlop={8}
                     style={styles.iconBtn}
                   >
                     <Icon
@@ -161,7 +160,6 @@ export function RoutineEditorScreen({ navigation, route }: Props) {
                     testID={`move-down-${item.key}`}
                     onPress={() => move(index, 1)}
                     disabled={index === items.length - 1}
-                    hitSlop={8}
                     style={styles.iconBtn}
                   >
                     <Icon
@@ -172,8 +170,7 @@ export function RoutineEditorScreen({ navigation, route }: Props) {
                   <Pressable
                     testID={`remove-${item.key}`}
                     onPress={() => remove(item.key)}
-                    hitSlop={8}
-                    style={styles.iconBtn}
+                    style={[styles.iconBtn, styles.removeBtn]}
                   >
                     <Icon name="close" color={colors.danger} />
                   </Pressable>
@@ -233,7 +230,7 @@ const styles = StyleSheet.create({
     color: colors.textPrimary,
   },
   emptyBody: {
-    ...typography.bodyMuted,
+    ...typography.body,
   },
   itemRow: {
     flexDirection: 'row',
@@ -258,7 +255,12 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   metaLabel: {
-    ...typography.bodyMuted,
+    ...typography.label,
+    // `typography.label` defaults to textSecondary, which clears AAA (7:1) on
+    // `bg` (7.3:1) but only reaches 6.55:1 on the itemRow card's `surface` fill
+    // — below the ergonomic-minima floor. Override to textPrimary in-panel so
+    // the label still reads at glance under sunlight/glare (see #26).
+    color: colors.textPrimary,
   },
   plannedInput: {
     ...typography.body,
@@ -277,8 +279,18 @@ const styles = StyleSheet.create({
     gap: spacing.xs,
   },
   iconBtn: {
-    paddingHorizontal: spacing.sm,
-    paddingVertical: spacing.xs,
+    // Annex tap-target floor from docs/conventions/ergonomic-minima.md § Numeric floor.
+    // hitSlop enlarges the hit area but not the visible target; the floor is a
+    // *visible* 48 dp so a sunlit/glare/thumb user can see and hit it.
+    minWidth: 48,
+    minHeight: 48,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  removeBtn: {
+    // Destructive-adjacent separation from docs/conventions/ergonomic-minima.md
+    // § Numeric floor: destructive next to primary needs ≥ 24 dp OR distinct region.
+    marginLeft: spacing.xl,
   },
   addCard: {
     backgroundColor: colors.surface,

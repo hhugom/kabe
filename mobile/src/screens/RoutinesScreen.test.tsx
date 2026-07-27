@@ -1,8 +1,15 @@
 import { fireEvent, render } from '@testing-library/react-native';
 import { useNavigation } from '@react-navigation/native';
+import { StyleSheet } from 'react-native';
+import { colors } from '../theme';
+import { contrastRatio } from '../theme-contrast';
 import type { Routine } from '../use-cases/routines';
 import { listRoutines } from '../use-cases/routines';
 import { RoutinesScreen } from './RoutinesScreen';
+
+function flatStyle(node: any): Record<string, any> {
+  return StyleSheet.flatten(node.props.style) ?? {};
+}
 
 jest.mock('@react-navigation/native', () => ({
   useNavigation: jest.fn(),
@@ -86,5 +93,40 @@ describe('RoutinesScreen', () => {
     fireEvent.press(await findByText('Browse drills'));
 
     expect(navigation.navigate).toHaveBeenCalledWith('Drills');
+  });
+
+  // Ergonomic-minima conformance (annex tier) —
+  // docs/conventions/ergonomic-minima.md § Numeric floor.
+  describe('annex ergonomic-minima conformance', () => {
+    it('routine rows have ≥ 48 dp tap targets and ≥ 16 sp labels', async () => {
+      mockListRoutines.mockResolvedValue([makeRoutine({ id: 'r-1', name: 'Wall warmup' })]);
+      const { findByTestId, findByText } = await render(<RoutinesScreen />);
+      expect(flatStyle(await findByTestId('routine-r-1')).minHeight).toBeGreaterThanOrEqual(48);
+      expect(flatStyle(await findByText('Wall warmup')).fontSize).toBeGreaterThanOrEqual(16);
+    });
+
+    it('"New routine" affordance has a ≥ 48 dp tap target and ≥ 16 sp label', async () => {
+      mockListRoutines.mockResolvedValue([]);
+      const { findByTestId, findByText } = await render(<RoutinesScreen />);
+      expect(flatStyle(await findByTestId('new-routine')).minHeight).toBeGreaterThanOrEqual(48);
+      expect(flatStyle(await findByText('+ New routine')).fontSize).toBeGreaterThanOrEqual(16);
+    });
+
+    it('routine-row label clears AAA (7:1) on the surface it sits on', async () => {
+      mockListRoutines.mockResolvedValue([makeRoutine({ id: 'r-1', name: 'Wall warmup' })]);
+      const { findByText } = await render(<RoutinesScreen />);
+      const label = flatStyle(await findByText('Wall warmup'));
+      const fg = label.color ?? colors.textPrimary;
+      expect(contrastRatio(fg, colors.surface)).toBeGreaterThanOrEqual(7);
+    });
+
+    it('"+ New routine" accent label clears AAA (7:1) on surface', async () => {
+      mockListRoutines.mockResolvedValue([]);
+      const { findByText } = await render(<RoutinesScreen />);
+      const label = flatStyle(await findByText('+ New routine'));
+      const fg = label.color ?? colors.textPrimary;
+      expect(contrastRatio(fg, colors.surface)).toBeGreaterThanOrEqual(7);
+    });
+
   });
 });

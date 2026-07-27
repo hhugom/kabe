@@ -220,7 +220,7 @@ const bootStyles = StyleSheet.create({
     marginBottom: spacing.sm,
   },
   body: {
-    ...typography.bodyMuted,
+    ...typography.body,
     textAlign: 'center',
   },
 });

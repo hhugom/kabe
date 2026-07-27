@@ -57,7 +57,7 @@ export function ArchetypesDemoScreen(_props: Props) {
     <Screen>
       <Text style={typography.label}>DEMO</Text>
       <Text style={typography.title}>Screen archetypes</Text>
-      <Text style={[typography.bodyMuted, { marginTop: spacing.xs }]}>Pick one to see it in isolation.</Text>
+      <Text style={[typography.body, { marginTop: spacing.xs }]}>Pick one to see it in isolation.</Text>
       <View style={styles.gap} />
       <View style={styles.stack}>
         <AppButton title="Show Tab-root" onPress={() => setMode('tabroot')} size="lg" />

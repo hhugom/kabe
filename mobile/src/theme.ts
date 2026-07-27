@@ -62,7 +62,10 @@ export const typography = {
     color: colors.textPrimary,
   },
   body: { fontSize: 16, lineHeight: 22, fontWeight: '500' as const, color: colors.textPrimary },
-  bodyMuted: { fontSize: 15, lineHeight: 20, fontWeight: '400' as const, color: colors.textSecondary },
+  // `bodyMuted` (15 sp textSecondary) was retired in issue #26: it violated
+  // both the annex body floor (≥ 16 sp per ergonomic-minima.md) and the
+  // structural-labels-only restriction on textSecondary. Body content is
+  // typography.body (textPrimary); structural labels are typography.label.
   label: {
     fontSize: 12,
     lineHeight: 16,

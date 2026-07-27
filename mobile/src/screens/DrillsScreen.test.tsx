@@ -1,8 +1,15 @@
 import { render } from '@testing-library/react-native';
 import { useNavigation } from '@react-navigation/native';
+import { StyleSheet } from 'react-native';
+import { colors } from '../theme';
+import { contrastRatio } from '../theme-contrast';
 import type { Drill } from '../use-cases/drills';
 import { listDrills } from '../use-cases/drills';
 import { DrillsScreen } from './DrillsScreen';
+
+function flatStyle(node: any): Record<string, any> {
+  return StyleSheet.flatten(node.props.style) ?? {};
+}
 
 jest.mock('@react-navigation/native', () => ({
   useNavigation: jest.fn(),
@@ -76,5 +83,40 @@ describe('DrillsScreen (annex)', () => {
     expect(queryByText('Routines')).toBeNull();
     expect(queryByText('+ New routine')).toBeNull();
     expect(queryByTestId('new-routine')).toBeNull();
+  });
+
+  // Ergonomic-minima conformance (annex tier) —
+  // docs/conventions/ergonomic-minima.md § Numeric floor.
+  describe('annex ergonomic-minima conformance', () => {
+    it('card metadata (category / target) is ≥ 16 sp and not in textSecondary', async () => {
+      mockListDrills.mockResolvedValue([
+        makeDrill({ id: '1', name: 'Wall rally', category: 'wall', target: 20 }),
+      ]);
+      const { findByText } = await render(<DrillsScreen />);
+      const category = flatStyle(await findByText('wall'));
+      const target = flatStyle(await findByText(/target 20/));
+      expect(category.fontSize).toBeGreaterThanOrEqual(16);
+      expect(target.fontSize).toBeGreaterThanOrEqual(16);
+      expect(category.color).not.toBe(colors.textSecondary);
+      expect(target.color).not.toBe(colors.textSecondary);
+    });
+
+    it('card metadata clears AAA (7:1) on the card surface', async () => {
+      mockListDrills.mockResolvedValue([
+        makeDrill({ id: '1', name: 'Wall rally', category: 'wall', target: 20 }),
+      ]);
+      const { findByText } = await render(<DrillsScreen />);
+      const category = flatStyle(await findByText('wall'));
+      const fg = category.color ?? colors.textPrimary;
+      expect(contrastRatio(fg, colors.surface)).toBeGreaterThanOrEqual(7);
+    });
+
+    it('empty-state body copy is ≥ 16 sp and not in textSecondary', async () => {
+      mockListDrills.mockResolvedValue([]);
+      const { findByText } = await render(<DrillsScreen />);
+      const body = flatStyle(await findByText(/seed drills should appear/i));
+      expect(body.fontSize).toBeGreaterThanOrEqual(16);
+      expect(body.color).not.toBe(colors.textSecondary);
+    });
   });
 });

@@ -6,6 +6,7 @@ module.exports = {
       testMatch: [
         '<rootDir>/src/use-cases/**/*.test.ts',
         '<rootDir>/src/db/**/*.test.ts',
+        '<rootDir>/src/*.test.ts',
       ],
       transform: {
         '^.+\\.tsx?$': [

@@ -95,11 +95,11 @@ const styles = StyleSheet.create({
     gap: spacing.sm,
   },
   category: {
-    ...typography.bodyMuted,
+    ...typography.body,
     textTransform: 'capitalize',
   },
   target: {
-    ...typography.bodyMuted,
+    ...typography.body,
   },
   badge: {
     backgroundColor: colors.accentSoft,
@@ -122,7 +122,7 @@ const styles = StyleSheet.create({
     ...typography.title,
   },
   emptyBody: {
-    ...typography.bodyMuted,
+    ...typography.body,
     marginTop: spacing.sm,
     textAlign: 'center',
   },
