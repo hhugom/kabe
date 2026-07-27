@@ -19,7 +19,7 @@ const styles = StyleSheet.create({
     ...typography.display,
   },
   tagline: {
-    ...typography.bodyMuted,
+    ...typography.body,
     marginTop: spacing.xs,
   },
 });

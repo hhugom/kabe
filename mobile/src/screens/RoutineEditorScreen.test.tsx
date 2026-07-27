@@ -1,6 +1,9 @@
 import { act, fireEvent, render } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
 import { TamaguiProvider } from 'tamagui';
 import tamaguiConfig from '../../tamagui.config';
+import { colors } from '../theme';
+import { contrastRatio } from '../theme-contrast';
 import type { Drill } from '../use-cases/drills';
 import { listDrills } from '../use-cases/drills';
 import type { Routine, RoutineItem } from '../use-cases/routines';
@@ -11,6 +14,10 @@ import {
   updateRoutine,
 } from '../use-cases/routines';
 import { RoutineEditorScreen } from './RoutineEditorScreen';
+
+function flatStyle(node: any): Record<string, any> {
+  return StyleSheet.flatten(node.props.style) ?? {};
+}
 
 // Sheet primitive is Tamagui's concern (proven in SheetLayout tests); render its
 // children inline when `open` so the Routine menu's Archive row is queryable.
@@ -365,6 +372,68 @@ describe('RoutineEditorScreen (edit mode)', () => {
 
     expect(mockArchiveRoutine).toHaveBeenCalledWith(null, 'r-9');
     expect(capturedNavigation.goBack).toHaveBeenCalled();
+  });
+
+  // Ergonomic-minima conformance (annex tier) —
+  // docs/conventions/ergonomic-minima.md § Numeric floor.
+  describe('annex ergonomic-minima conformance', () => {
+    async function renderWithItem() {
+      mockListDrills.mockResolvedValue([makeDrill({ id: 'd-a', name: 'Wall rally' })]);
+      mockGetRoutine.mockResolvedValue({
+        routine: makeRoutine({ id: 'r-1', name: 'Existing' }),
+        items: [makeRoutineItem({ id: 'ri-1', drillId: 'd-a', plannedSets: 1, position: 0 })],
+      });
+      return renderScreen({ routineId: 'r-1' });
+    }
+
+    it('row-action icon buttons expose a ≥ 48 dp visible tap target (hitSlop does not substitute)', async () => {
+      const { findByTestId } = await renderWithItem();
+      for (const id of ['move-up-ri-1', 'move-down-ri-1', 'remove-ri-1']) {
+        const s = flatStyle(await findByTestId(id));
+        expect(s.minWidth ?? 0).toBeGreaterThanOrEqual(48);
+        expect(s.minHeight ?? 0).toBeGreaterThanOrEqual(48);
+      }
+    });
+
+    it('destructive remove is separated from the primary reorder controls (≥ 24 dp or distinct region)', async () => {
+      // ergonomic-minima.md § Numeric floor: "Gap when destructive is adjacent
+      // to primary ≥ 24 dp OR destructive in a visually distinct region".
+      // The remove-icon is destructive-tinted (colors.danger). We encode the
+      // gap-margin option: `remove` carries a marginLeft ≥ 24 that visually
+      // pushes it away from the move controls.
+      const { findByTestId } = await renderWithItem();
+      const remove = flatStyle(await findByTestId('remove-ri-1'));
+      expect(remove.marginLeft ?? 0).toBeGreaterThanOrEqual(24);
+    });
+
+    it('meta label ("Planned sets") uses a compliant token — either uppercase-≥12 or ≥16 body-primary', async () => {
+      const { findByText } = await renderWithItem();
+      const label = flatStyle(await findByText('Planned sets'));
+      const isStructural =
+        label.textTransform === 'uppercase' && (label.fontSize ?? 0) >= 12;
+      const isBodyPrimary =
+        (label.fontSize ?? 0) >= 16 && label.color !== colors.textSecondary;
+      expect(isStructural || isBodyPrimary).toBe(true);
+    });
+
+    it('meta label ("Planned sets") clears AAA (7:1) on the card surface it sits inside', async () => {
+      // The label sits inside the itemRow card (backgroundColor: colors.surface).
+      // typography.label's default color (textSecondary #8FA4B8) drops to 6.55:1
+      // on surface — below the 7:1 body-tier floor. Force a compliant override.
+      const { findByText } = await renderWithItem();
+      const label = flatStyle(await findByText('Planned sets'));
+      const fg = label.color ?? colors.textPrimary;
+      expect(contrastRatio(fg, colors.surface)).toBeGreaterThanOrEqual(7);
+    });
+
+    it('empty-drills body copy is ≥ 16 sp and not in textSecondary', async () => {
+      // Empty state: no items yet, so we render fresh with no getRoutine call.
+      mockListDrills.mockResolvedValue([]);
+      const { findByText } = await renderScreen();
+      const body = flatStyle(await findByText(/no drills yet/i));
+      expect(body.fontSize).toBeGreaterThanOrEqual(16);
+      expect(body.color).not.toBe(colors.textSecondary);
+    });
   });
 
   it('moving an item up reorders the saved items', async () => {

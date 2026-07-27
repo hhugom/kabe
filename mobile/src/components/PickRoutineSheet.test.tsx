@@ -1,10 +1,17 @@
 import { fireEvent, render } from '@testing-library/react-native';
+import { StyleSheet } from 'react-native';
 import { TamaguiProvider } from 'tamagui';
 import tamaguiConfig from '../../tamagui.config';
+import { colors } from '../theme';
+import { contrastRatio } from '../theme-contrast';
 import type { Routine } from '../use-cases/routines';
 import { listRoutines } from '../use-cases/routines';
 import { startSession } from '../use-cases/sessions';
 import { PickRoutineSheet } from './PickRoutineSheet';
+
+function flatStyle(node: any): Record<string, any> {
+  return StyleSheet.flatten(node.props.style) ?? {};
+}
 
 // Sheet primitive is Tamagui's concern (proven in SheetLayout tests). Here we
 // mock it out so children render inline when `open` is true.
@@ -119,5 +126,32 @@ describe('PickRoutineSheet', () => {
     const [, opts] = mockStartSession.mock.calls[0];
     expect(opts?.routineId).toBe('r-1');
     expect(onStarted).toHaveBeenCalledTimes(1);
+  });
+
+  // Ergonomic-minima conformance (annex tier):
+  //   docs/conventions/ergonomic-minima.md § Numeric floor
+  //   — tap target ≥ 48 dp, body text ≥ 16 sp, AAA text contrast on surface panel.
+  describe('annex ergonomic-minima conformance', () => {
+    it('rows enforce a ≥ 48 dp tap target explicitly (not relying on padding+text)', async () => {
+      mockListRoutines.mockResolvedValue([makeRoutine({ id: 'r-1', name: 'Wall warmup' })]);
+      const { findByTestId } = await render(
+        wrap(<PickRoutineSheet open onOpenChange={() => {}} onStarted={() => {}} />)
+      );
+      const empty = flatStyle(await findByTestId('pick-routine-empty-start'));
+      const routine = flatStyle(await findByTestId('pick-routine-r-1'));
+      expect(empty.minHeight).toBeGreaterThanOrEqual(48);
+      expect(routine.minHeight).toBeGreaterThanOrEqual(48);
+    });
+
+    it('row label is ≥ 16 sp and clears AAA (7:1) on surfaceHi', async () => {
+      mockListRoutines.mockResolvedValue([makeRoutine({ id: 'r-1', name: 'Wall warmup' })]);
+      const { findByText } = await render(
+        wrap(<PickRoutineSheet open onOpenChange={() => {}} onStarted={() => {}} />)
+      );
+      const label = flatStyle(await findByText('Wall warmup'));
+      expect(label.fontSize).toBeGreaterThanOrEqual(16);
+      const fg = label.color ?? colors.textPrimary;
+      expect(contrastRatio(fg, colors.surfaceHi)).toBeGreaterThanOrEqual(7);
+    });
   });
 });

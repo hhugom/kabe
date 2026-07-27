@@ -23,7 +23,7 @@ const styles = StyleSheet.create({
     ...typography.title,
   },
   body: {
-    ...typography.bodyMuted,
+    ...typography.body,
     marginTop: spacing.sm,
     textAlign: 'center',
   },
