@@ -10,12 +10,7 @@ function flattenStyle(style: any): Record<string, any> {
 describe('PillHeader', () => {
   it('renders the title in the header row', async () => {
     const { findByText } = await render(
-      <PillHeader
-        title="Edit routine"
-        onBack={() => {}}
-        sessionActive={false}
-        onResumePress={() => {}}
-      />
+      <PillHeader title="Edit routine" onBack={() => {}} />
     );
     expect(await findByText('Edit routine')).toBeTruthy();
   });
@@ -23,12 +18,7 @@ describe('PillHeader', () => {
   it('renders the title at caption-tier Chrome sizing (small/quiet)', async () => {
     // navigation-surface.md § Header stance: "title — small/quiet Chrome … never the goal statement".
     const { findByText } = await render(
-      <PillHeader
-        title="Session"
-        onBack={() => {}}
-        sessionActive={false}
-        onResumePress={() => {}}
-      />
+      <PillHeader title="Session" onBack={() => {}} />
     );
     const titleEl = await findByText('Session');
     const style = flattenStyle(titleEl.props.style);
@@ -36,53 +26,10 @@ describe('PillHeader', () => {
     expect(style.color).toBe(typography.caption.color);
   });
 
-  it('renders the ActiveSessionPill when a session is active', async () => {
-    const { findByTestId } = await render(
-      <PillHeader
-        title="Edit routine"
-        onBack={() => {}}
-        sessionActive={true}
-        onResumePress={() => {}}
-      />
-    );
-    expect(await findByTestId('active-session-pill')).toBeTruthy();
-  });
-
-  it('omits the ActiveSessionPill when no session is active', async () => {
-    const { queryByTestId } = await render(
-      <PillHeader
-        title="Edit routine"
-        onBack={() => {}}
-        sessionActive={false}
-        onResumePress={() => {}}
-      />
-    );
-    expect(queryByTestId('active-session-pill')).toBeNull();
-  });
-
-  it('pressing the pill fires onResumePress', async () => {
-    const onResumePress = jest.fn();
-    const { findByTestId } = await render(
-      <PillHeader
-        title="Edit routine"
-        onBack={() => {}}
-        sessionActive={true}
-        onResumePress={onResumePress}
-      />
-    );
-    fireEvent.press(await findByTestId('active-session-pill'));
-    expect(onResumePress).toHaveBeenCalledTimes(1);
-  });
-
   it('pressing the back button fires onBack', async () => {
     const onBack = jest.fn();
     const { findByTestId } = await render(
-      <PillHeader
-        title="Edit routine"
-        onBack={onBack}
-        sessionActive={false}
-        onResumePress={() => {}}
-      />
+      <PillHeader title="Edit routine" onBack={onBack} />
     );
     fireEvent.press(await findByTestId('pill-header-back'));
     expect(onBack).toHaveBeenCalledTimes(1);
@@ -90,25 +37,14 @@ describe('PillHeader', () => {
 
   it('renders the three-dot menu affordance when onMenuPress is provided', async () => {
     const { findByTestId } = await render(
-      <PillHeader
-        title="Session"
-        onBack={() => {}}
-        sessionActive={false}
-        onResumePress={() => {}}
-        onMenuPress={() => {}}
-      />
+      <PillHeader title="Session" onBack={() => {}} onMenuPress={() => {}} />
     );
     expect(await findByTestId('pill-header-menu')).toBeTruthy();
   });
 
   it('omits the three-dot menu affordance when onMenuPress is not provided', async () => {
     const { queryByTestId } = await render(
-      <PillHeader
-        title="New routine"
-        onBack={() => {}}
-        sessionActive={false}
-        onResumePress={() => {}}
-      />
+      <PillHeader title="New routine" onBack={() => {}} />
     );
     expect(queryByTestId('pill-header-menu')).toBeNull();
   });
@@ -116,13 +52,7 @@ describe('PillHeader', () => {
   it('pressing the three-dot menu fires onMenuPress', async () => {
     const onMenuPress = jest.fn();
     const { findByTestId } = await render(
-      <PillHeader
-        title="Session"
-        onBack={() => {}}
-        sessionActive={false}
-        onResumePress={() => {}}
-        onMenuPress={onMenuPress}
-      />
+      <PillHeader title="Session" onBack={() => {}} onMenuPress={onMenuPress} />
     );
     fireEvent.press(await findByTestId('pill-header-menu'));
     expect(onMenuPress).toHaveBeenCalledTimes(1);
@@ -132,12 +62,7 @@ describe('PillHeader', () => {
     // navigation-surface.md § Back / dismiss: "56dp tap target via hit-slop
     // even though the icon itself is smaller."
     const { findByTestId } = await render(
-      <PillHeader
-        title="Session"
-        onBack={() => {}}
-        sessionActive={false}
-        onResumePress={() => {}}
-      />
+      <PillHeader title="Session" onBack={() => {}} />
     );
     const back = await findByTestId('pill-header-back');
     const style = flattenStyle(back.props.style);
@@ -148,28 +73,5 @@ describe('PillHeader', () => {
     const height = style.height ?? 0;
     expect(width + (slop.left ?? 0) + (slop.right ?? 0)).toBe(56);
     expect(height + (slop.top ?? 0) + (slop.bottom ?? 0)).toBe(56);
-  });
-
-  it('renders the pill visually above the header row', async () => {
-    // Stacking order per docs/conventions/navigation-surface.md § Active-session pill
-    // (row "Stack push with RN header"): status bar → pill → header → content.
-    // Verified structurally: pill is an earlier sibling than the header row inside the wrapper.
-    const { findByTestId } = await render(
-      <PillHeader
-        title="Edit routine"
-        onBack={() => {}}
-        sessionActive={true}
-        onResumePress={() => {}}
-      />
-    );
-    const pill = await findByTestId('active-session-pill');
-    const headerRow = await findByTestId('pill-header-row');
-    const wrapper = pill.parent!;
-    const children = wrapper.children as unknown as any[];
-    const pillIndex = children.indexOf(pill);
-    const headerIndex = children.indexOf(headerRow);
-    expect(pillIndex).toBeGreaterThanOrEqual(0);
-    expect(headerIndex).toBeGreaterThanOrEqual(0);
-    expect(pillIndex).toBeLessThan(headerIndex);
   });
 });

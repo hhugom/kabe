@@ -1,6 +1,7 @@
 // RN Modal is proven in ModalLayout.test.tsx; here we render children inline
-// when `visible` is true so the unfilled-slots modal's actions become queryable.
-// Also capture onRequestClose so tests can simulate hardware back on Android.
+// when `visible` is true so modal actions (unfilled-slots, switch-timer,
+// delete-slot) become queryable. Also capture onRequestClose so tests can
+// simulate hardware back on Android.
 const modalProps: any[] = [];
 jest.mock('react-native/Libraries/Modal/Modal', () => {
   const React = require('react');
@@ -13,7 +14,7 @@ jest.mock('react-native/Libraries/Modal/Modal', () => {
   };
 });
 
-import { act, fireEvent, render, waitFor } from '@testing-library/react-native';
+import { act, cleanup, fireEvent, render, waitFor } from '@testing-library/react-native';
 import { AppState } from 'react-native';
 import { TamaguiProvider } from 'tamagui';
 import tamaguiConfig from '../../tamagui.config';
@@ -32,7 +33,7 @@ import {
 import { InSessionScreen } from './InSessionScreen';
 
 // Tamagui Sheet is proven in SheetLayout tests; here we render children inline
-// when `open` is true so the SessionMenuSheet content becomes queryable.
+// when `open` is true so SessionMenuSheet + EditEntrySheet content becomes queryable.
 jest.mock('tamagui', () => {
   const actual = jest.requireActual('tamagui');
   function MockSheet(props: any) {
@@ -154,95 +155,151 @@ function makeEntry(over: Partial<DrillEntry> = {}): DrillEntry {
   };
 }
 
-let currentNavigation: {
-  goBack: jest.Mock;
-  navigate: jest.Mock;
-  setOptions: jest.Mock;
-} | null = null;
-
-// Reads the last `onMenuPress` handler registered via navigation.setOptions.
-// This mirrors what App.tsx#renderPillHeader does with the header's three-dot.
-async function pressHeaderMenu() {
-  if (!currentNavigation) throw new Error('renderScreen not called');
-  for (let i = currentNavigation.setOptions.mock.calls.length - 1; i >= 0; i--) {
-    const opts = currentNavigation.setOptions.mock.calls[i][0];
-    if (opts && typeof opts.onMenuPress === 'function') {
-      await act(async () => {
-        opts.onMenuPress();
-      });
-      return;
-    }
-  }
-  throw new Error('no onMenuPress registered via setOptions');
-}
+// InSession's onClose is the sheet controller's `close` (session-ended
+// signal). Tests spy on it to assert the "end session" path fired.
+let onCloseSpy: jest.Mock;
 
 async function renderScreen(opts: { clock?: () => Date } = {}) {
-  const navigation = {
-    goBack: jest.fn(),
-    navigate: jest.fn(),
-    setOptions: jest.fn(),
-  } as any;
-  currentNavigation = navigation;
-  const route = { key: 'k', name: 'InSession' } as any;
+  onCloseSpy = jest.fn();
   let result: ReturnType<typeof render>;
   await act(async () => {
     result = render(
       <TamaguiProvider config={tamaguiConfig} defaultTheme="kabe_dark">
-        <InSessionScreen navigation={navigation} route={route} clock={opts.clock} />
+        <InSessionScreen clock={opts.clock} onClose={onCloseSpy} />
       </TamaguiProvider>
     );
   });
   return result!;
 }
 
-describe('InSessionScreen — timer, wake-lock, and navigation', () => {
-  beforeEach(() => {
-    mockListDrills.mockReset();
-    mockGetActiveSession.mockReset();
-    mockLogEntry.mockReset();
-    mockGetRoutine.mockReset();
-    mockEndSession.mockReset();
-    mockUpdateEntry.mockReset();
-    mockUpdateEntry.mockResolvedValue(undefined as any);
-    mockDeleteEntry.mockReset();
-    mockDeleteEntry.mockResolvedValue(undefined as any);
-    mockActivateKeepAwake.mockReset();
-    mockActivateKeepAwake.mockResolvedValue(undefined);
-    mockDeactivateKeepAwake.mockReset();
-    mockGetActiveSession.mockResolvedValue({ session: makeSession(), entries: [] });
-    mockLogEntry.mockResolvedValue(makeEntry());
-    mockGetRoutine.mockResolvedValue(null);
-    mockEndSession.mockResolvedValue(undefined as any);
-    mockAddADrillSheetProps.length = 0;
+// Reads the in-sheet three-dot and presses it. Under ADR-0004 the menu is
+// owned by InSession itself (no more navigation.setOptions indirection).
+async function pressSessionMenu(
+  findByTestId: (id: string) => Promise<any>
+) {
+  const btn = await findByTestId('insession-menu');
+  await act(async () => {
+    fireEvent.press(btn);
   });
+}
 
-  it('navigates back when no session is active', async () => {
+// Explicit cleanup after every test in the file — without this, React 19's
+// batching leaves the previous test's tree mounted long enough that the next
+// test's InSessionScreen sees stale state and renders empty.
+afterEach(() => {
+  cleanup();
+});
+
+// Common test fixtures — routine with N planned sets of a single drill.
+function seedRoutine({
+  plannedSets = 3 as number | null,
+  drillTarget = null as number | null,
+  drillMetric = 'reps' as Drill['metric'],
+  entries = [] as DrillEntry[],
+  itemId = 'ri-1',
+  drillId = 'd-1',
+  drillName = 'Wall rally',
+} = {}) {
+  const drill = makeDrill({
+    id: drillId,
+    name: drillName,
+    metric: drillMetric,
+    target: drillTarget,
+  });
+  mockListDrills.mockResolvedValue([drill]);
+  mockGetActiveSession.mockResolvedValue({
+    session: makeSession({ id: 'session-1', routineId: 'r-1' }),
+    entries,
+  });
+  mockGetRoutine.mockResolvedValue({
+    routine: { id: 'r-1', name: 'R', createdAt: NOW, updatedAt: NOW, deletedAt: null } as any,
+    items: [
+      {
+        id: itemId,
+        routineId: 'r-1',
+        drillId,
+        plannedSets,
+        position: 0,
+        createdAt: NOW,
+        updatedAt: NOW,
+        deletedAt: null,
+      } as any,
+    ],
+  });
+  return drill;
+}
+
+function resetMocks() {
+  mockListDrills.mockReset();
+  mockGetActiveSession.mockReset();
+  mockLogEntry.mockReset();
+  mockGetRoutine.mockReset();
+  mockEndSession.mockReset();
+  mockUpdateEntry.mockReset();
+  mockUpdateEntry.mockResolvedValue(undefined as any);
+  mockDeleteEntry.mockReset();
+  mockDeleteEntry.mockResolvedValue(undefined as any);
+  mockActivateKeepAwake.mockReset();
+  mockActivateKeepAwake.mockResolvedValue(undefined);
+  mockDeactivateKeepAwake.mockReset();
+  mockGetActiveSession.mockResolvedValue({ session: makeSession(), entries: [] });
+  mockLogEntry.mockResolvedValue(makeEntry());
+  mockGetRoutine.mockResolvedValue(null);
+  mockEndSession.mockResolvedValue(undefined as any);
+  mockAddADrillSheetProps.length = 0;
+  modalProps.length = 0;
+}
+
+describe('InSessionScreen — hydration + auto-focus', () => {
+  beforeEach(resetMocks);
+
+  it('signals close (session-ended) when no session is active', async () => {
     mockGetActiveSession.mockResolvedValue(null);
     mockListDrills.mockResolvedValue([]);
 
     await renderScreen();
-
     await act(async () => {});
 
-    expect(currentNavigation!.goBack).toHaveBeenCalled();
+    expect(onCloseSpy).toHaveBeenCalled();
   });
 
+  it('auto-focuses the first unfilled planned slot on hydrate', async () => {
+    seedRoutine({ plannedSets: 3, drillMetric: 'reps' });
+
+    const { findByTestId } = await renderScreen();
+
+    expect(await findByTestId('focus-hero')).toBeTruthy();
+    expect(await findByTestId('reps-hero-readout')).toBeTruthy();
+  });
+
+  it('renders the empty hero when the session has neither planned nor ad-hoc entries', async () => {
+    mockGetActiveSession.mockResolvedValue({ session: makeSession(), entries: [] });
+    mockGetRoutine.mockResolvedValue(null);
+    mockListDrills.mockResolvedValue([]);
+
+    const { findByTestId } = await renderScreen();
+
+    expect(await findByTestId('empty-hero')).toBeTruthy();
+  });
+});
+
+describe('InSessionScreen — duration timer, wake-lock, and app-state resume', () => {
+  beforeEach(resetMocks);
+
   it('duration Start → Stop persists elapsed seconds via logEntry', async () => {
-    const drill = makeDrill({ id: 'dur-1', name: 'Wall rally', metric: 'duration' });
-    mockListDrills.mockResolvedValue([drill]);
+    seedRoutine({ plannedSets: 1, drillMetric: 'duration', drillId: 'dur-1' });
 
     let ticks = 0;
     const t0 = Date.parse(NOW);
     const clock = () => new Date(t0 + ticks);
 
-    const { findByTestId, findByText } = await renderScreen({ clock });
-    fireEvent.press(await findByText('Add a drill'));
-    fireEvent.press(await findByTestId('add-a-drill-row-dur-1'));
+    const { findByLabelText } = await renderScreen({ clock });
 
-    fireEvent.press(await findByText('Start'));
+    fireEvent.press(await findByLabelText('Start'));
     ticks = 600_000;
-    fireEvent.press(await findByText('Stop'));
+    fireEvent.press(await findByLabelText('Stop'));
 
+    await waitFor(() => expect(mockLogEntry).toHaveBeenCalled());
     expect(mockLogEntry.mock.calls[0][1]).toEqual(
       expect.objectContaining({
         sessionId: 'session-1',
@@ -254,83 +311,73 @@ describe('InSessionScreen — timer, wake-lock, and navigation', () => {
   });
 
   it('displayed elapsed at Stop agrees with wall-clock difference between Start and Stop', async () => {
-    const drill = makeDrill({ id: 'dur-disp', name: 'Wall rally', metric: 'duration' });
-    mockListDrills.mockResolvedValue([drill]);
+    seedRoutine({ plannedSets: 1, drillMetric: 'duration', drillId: 'dur-disp' });
 
     let ticks = 0;
     const t0 = Date.parse(NOW);
     const clock = () => new Date(t0 + ticks);
 
-    const { findByTestId, findByText } = await renderScreen({ clock });
-    fireEvent.press(await findByText('Add a drill'));
-    fireEvent.press(await findByTestId('add-a-drill-row-dur-disp'));
+    const { findByText, findByLabelText } = await renderScreen({ clock });
 
-    fireEvent.press(await findByText('Start'));
-    // 3 minutes 7 seconds after Start
+    fireEvent.press(await findByLabelText('Start'));
     ticks = 187_000;
-
-    // Elapsed on screen must reflect the wall-clock diff before Stop is pressed.
     expect(await findByText('3:07')).toBeTruthy();
 
-    fireEvent.press(await findByText('Stop'));
+    fireEvent.press(await findByLabelText('Stop'));
+    await waitFor(() => expect(mockLogEntry).toHaveBeenCalled());
     expect(mockLogEntry.mock.calls[0][1].value).toBe(187);
   });
 
-  it('duration timer shows the drill target as a reference label', async () => {
-    const drill = makeDrill({
-      id: 'dur-t',
-      name: 'Wall rally',
-      metric: 'duration',
-      target: 600,
+  it('duration timer shows the drill target as a stat chip', async () => {
+    seedRoutine({
+      plannedSets: 1,
+      drillMetric: 'duration',
+      drillId: 'dur-t',
+      drillTarget: 600,
     });
-    mockListDrills.mockResolvedValue([drill]);
 
-    const { findByTestId, findByText, findAllByText } = await renderScreen();
-    fireEvent.press(await findByText('Add a drill'));
-    fireEvent.press(await findByTestId('add-a-drill-row-dur-t'));
+    const { findByTestId } = await renderScreen();
 
-    // Zwift-HUD layout splits target label and value: a "TARGET" chip labels the 10:00 value.
-    expect(await findByText(/target/i)).toBeTruthy();
-    const tens = await findAllByText('10:00');
-    expect(tens.length).toBeGreaterThan(0);
+    const targetChip = await findByTestId('duration-target-chip-value');
+    expect(JSON.stringify(targetChip.props)).toMatch(/10:00/);
   });
 
-  it('duration timer with no target does not show a target label', async () => {
-    const drill = makeDrill({ id: 'dur-nt', name: 'Wall rally', metric: 'duration', target: null });
-    mockListDrills.mockResolvedValue([drill]);
+  it('duration timer with no target does not render the progress track or stat chips', async () => {
+    seedRoutine({
+      plannedSets: 1,
+      drillMetric: 'duration',
+      drillId: 'dur-nt',
+      drillTarget: null,
+    });
 
-    const { findByTestId, findByText, queryByText } = await renderScreen();
-    fireEvent.press(await findByText('Add a drill'));
-    fireEvent.press(await findByTestId('add-a-drill-row-dur-nt'));
+    const { findByLabelText, queryByTestId } = await renderScreen();
+    await findByLabelText('Start');
 
-    expect(queryByText(/target/i)).toBeNull();
+    expect(queryByTestId('duration-progress-track')).toBeNull();
+    expect(queryByTestId('duration-target-chip-value')).toBeNull();
   });
 
   it('activates keep-awake only while the timer is running', async () => {
-    const drill = makeDrill({ id: 'dur-k', name: 'Wall rally', metric: 'duration' });
-    mockListDrills.mockResolvedValue([drill]);
+    seedRoutine({ plannedSets: 1, drillMetric: 'duration', drillId: 'dur-k' });
 
     let ticks = 0;
     const clock = () => new Date(Date.parse(NOW) + ticks);
 
-    const { findByTestId, findByText } = await renderScreen({ clock });
-    fireEvent.press(await findByText('Add a drill'));
-    fireEvent.press(await findByTestId('add-a-drill-row-dur-k'));
+    const { findByLabelText } = await renderScreen({ clock });
 
     expect(mockActivateKeepAwake).not.toHaveBeenCalled();
 
-    fireEvent.press(await findByText('Start'));
+    fireEvent.press(await findByLabelText('Start'));
     expect(mockActivateKeepAwake).toHaveBeenCalledTimes(1);
     expect(mockDeactivateKeepAwake).not.toHaveBeenCalled();
 
     ticks = 5000;
-    fireEvent.press(await findByText('Stop'));
+    fireEvent.press(await findByLabelText('Stop'));
     expect(mockDeactivateKeepAwake).toHaveBeenCalledTimes(1);
   });
 
   it('recomputes elapsed from startedAt when the app returns to foreground', async () => {
-    const drill = makeDrill({ id: 'dur-fg', name: 'Wall rally', metric: 'duration' });
-    mockListDrills.mockResolvedValue([drill]);
+    seedRoutine({ plannedSets: 1, drillMetric: 'duration', drillId: 'dur-fg' });
 
     let ticks = 0;
     const clock = () => new Date(Date.parse(NOW) + ticks);
@@ -345,12 +392,9 @@ describe('InSessionScreen — timer, wake-lock, and navigation', () => {
     );
 
     try {
-      const { findByTestId, findByText } = await renderScreen({ clock });
-      fireEvent.press(await findByText('Add a drill'));
-      fireEvent.press(await findByTestId('add-a-drill-row-dur-fg'));
-      fireEvent.press(await findByText('Start'));
+      const { findByText, findByLabelText } = await renderScreen({ clock });
+      fireEvent.press(await findByLabelText('Start'));
 
-      // Simulate the OS pausing JS while the app is backgrounded — clock jumps 30s.
       ticks = 30_000;
       act(() => {
         listeners.forEach((l) => l('active'));
@@ -361,253 +405,211 @@ describe('InSessionScreen — timer, wake-lock, and navigation', () => {
       addListenerSpy.mockRestore();
     }
   });
+});
 
-  it('picker branch renders no footer End Session button (end lives in the sheet)', async () => {
+describe('InSessionScreen — session menu + end-session flow', () => {
+  beforeEach(resetMocks);
+
+  it('opens the Session menu sheet from the in-sheet three-dot on the empty hero', async () => {
+    mockGetActiveSession.mockResolvedValue({ session: makeSession(), entries: [] });
+    mockGetRoutine.mockResolvedValue(null);
     mockListDrills.mockResolvedValue([]);
 
-    const { findByText, queryByText } = await renderScreen();
-    // Wait for the picker to hydrate.
-    await findByText('What are you working on?');
-    // The only "End Session" affordance now lives inside the Session menu sheet,
-    // which starts closed — so no such text should be present on the picker itself.
-    expect(queryByText('End Session')).toBeNull();
+    const { findByTestId, queryByTestId } = await renderScreen();
+    await findByTestId('empty-hero');
+    expect(queryByTestId('session-menu-end-session')).toBeNull();
+
+    await pressSessionMenu(findByTestId);
+
+    expect(await findByTestId('session-menu-end-session')).toBeTruthy();
   });
 
-  it('pressing the header three-dot on the picker branch opens the Session menu sheet', async () => {
+  it('opens the Session menu sheet from the in-sheet three-dot on the focus hero', async () => {
+    seedRoutine({ plannedSets: 1, drillMetric: 'reps', drillId: 'reps-m' });
+
+    const { findByTestId, queryByTestId } = await renderScreen();
+    await findByTestId('focus-hero');
+    expect(queryByTestId('session-menu-end-session')).toBeNull();
+
+    await pressSessionMenu(findByTestId);
+
+    expect(await findByTestId('session-menu-end-session')).toBeTruthy();
+  });
+
+  it('tapping End Session in the sheet with no unfilled slots ends and signals close', async () => {
+    mockGetActiveSession.mockResolvedValue({ session: makeSession(), entries: [] });
+    mockGetRoutine.mockResolvedValue(null);
     mockListDrills.mockResolvedValue([]);
 
-    const { findByText, findByTestId, queryByTestId } = await renderScreen();
-    // The picker renders the "What are you working on?" prompt; assert we're on it,
-    // and that the sheet's End Session row (testID) is not present until the menu opens.
-    await findByText('What are you working on?');
-    expect(queryByTestId('session-menu-end-session')).toBeNull();
+    const { findByTestId } = await renderScreen();
+    await findByTestId('empty-hero');
 
-    await pressHeaderMenu();
-
-    expect(await findByTestId('session-menu-end-session')).toBeTruthy();
-  });
-
-  it('reps branch: three-dot opens the Session menu sheet', async () => {
-    const drill = makeDrill({ id: 'reps-m', name: 'Serve reps', metric: 'reps' });
-    mockListDrills.mockResolvedValue([drill]);
-
-    const { findByTestId, findByText, findByLabelText, queryByTestId } = await renderScreen();
-    fireEvent.press(await findByText('Add a drill'));
-    fireEvent.press(await findByTestId('add-a-drill-row-reps-m'));
-    // Reps entry screen surfaces the REPS number field.
-    await findByLabelText('reps-input');
-    expect(queryByTestId('session-menu-end-session')).toBeNull();
-
-    await pressHeaderMenu();
-
-    expect(await findByTestId('session-menu-end-session')).toBeTruthy();
-  });
-
-  it('accuracy branch: three-dot opens the Session menu sheet', async () => {
-    const drill = makeDrill({ id: 'acc-m', name: 'Serve accuracy', metric: 'accuracy' });
-    mockListDrills.mockResolvedValue([drill]);
-
-    const { findByTestId, findByText, findByLabelText, queryByTestId } = await renderScreen();
-    fireEvent.press(await findByText('Add a drill'));
-    fireEvent.press(await findByTestId('add-a-drill-row-acc-m'));
-    await findByLabelText('accuracy-value-input');
-    expect(queryByTestId('session-menu-end-session')).toBeNull();
-
-    await pressHeaderMenu();
-
-    expect(await findByTestId('session-menu-end-session')).toBeTruthy();
-  });
-
-  it('duration branch: three-dot opens the Session menu sheet', async () => {
-    const drill = makeDrill({ id: 'dur-m', name: 'Wall rally', metric: 'duration' });
-    mockListDrills.mockResolvedValue([drill]);
-
-    const { findByTestId, findByText, queryByTestId } = await renderScreen();
-    fireEvent.press(await findByText('Add a drill'));
-    fireEvent.press(await findByTestId('add-a-drill-row-dur-m'));
-    await findByText('Start');
-    expect(queryByTestId('session-menu-end-session')).toBeNull();
-
-    await pressHeaderMenu();
-
-    expect(await findByTestId('session-menu-end-session')).toBeTruthy();
-  });
-
-  it('tapping End Session in the Session menu sheet ends the session and navigates back', async () => {
-    mockListDrills.mockResolvedValue([]);
-
-    const { findByText, findByTestId } = await renderScreen();
-    await findByText('What are you working on?');
-
-    await pressHeaderMenu();
+    await pressSessionMenu(findByTestId);
     await act(async () => {
       fireEvent.press(await findByTestId('session-menu-end-session'));
-      // onEndSession fires an async `onEnd` chain (endActiveSession → endSession →
-      // navigation.goBack). Wait a tick so the chain settles inside this act scope
-      // — otherwise it resolves during the next test and contaminates it.
       await new Promise((res) => setImmediate(res));
     });
 
-    expect(mockEndSession).toHaveBeenCalledWith(
-      null,
-      'session-1',
-      expect.anything()
-    );
-    expect(currentNavigation!.goBack).toHaveBeenCalled();
+    expect(mockEndSession).toHaveBeenCalledWith(null, 'session-1', expect.anything());
+    expect(onCloseSpy).toHaveBeenCalled();
   });
+});
 
-  it('"Add a drill" CTA opens the AddADrillSheet with every library drill', async () => {
-    const drillA = makeDrill({ id: 'w1', name: 'Wall rally', category: 'wall' });
-    const drillB = makeDrill({ id: 's1', name: 'Slice serve', category: 'service' });
-    mockListDrills.mockResolvedValue([drillA, drillB]);
+describe('InSessionScreen — add-a-drill from the up-next strip', () => {
+  beforeEach(resetMocks);
 
-    const { findByText, findByTestId } = await renderScreen();
+  it('the "Add drill" chip in the up-next strip opens the AddADrillSheet', async () => {
+    seedRoutine({ plannedSets: 1, drillMetric: 'reps', drillId: 'w1', drillName: 'Wall rally' });
 
-    // findByText waits for hydration; after it resolves the sheet has been
-    // rendered at least once with `open: false`.
-    fireEvent.press(await findByText('Add a drill'));
+    const { findByTestId } = await renderScreen();
+    await findByTestId('focus-hero');
 
-    // findByTestId polls until the mock re-renders with `open: true` and
-    // emits the row for our drill.
+    await act(async () => {
+      fireEvent.press(await findByTestId('up-next-add-drill'));
+    });
+
     expect(await findByTestId('add-a-drill-row-w1')).toBeTruthy();
 
     const props = mockAddADrillSheetProps[mockAddADrillSheetProps.length - 1];
     expect(props.open).toBe(true);
-    expect(props.drills.map((d: { id: string }) => d.id).sort()).toEqual(['s1', 'w1']);
   });
 
-  it('picking a drill from the sheet enters that drill\'s entry mode and closes the sheet', async () => {
-    // AC: "Selecting a drill creates an ad-hoc DrillEntry on the active session
-    //      and navigates to the drill's entry mode".
-    // The entry mode is a distinct rendered UI within InSessionScreen (per
-    // docs/conventions/primary-vs-annex.md § The unit: mode-screen). Landing on
-    // reps input for the picked drill means we've navigated to it.
-    const drill = makeDrill({ id: 'w1', name: 'Wall rally', category: 'wall', metric: 'reps' });
+  it('the empty-hero "Add a drill" button also opens the AddADrillSheet', async () => {
+    const drill = makeDrill({ id: 'w1', name: 'Wall rally' });
     mockListDrills.mockResolvedValue([drill]);
+    mockGetActiveSession.mockResolvedValue({ session: makeSession(), entries: [] });
+    mockGetRoutine.mockResolvedValue(null);
 
-    const { findByText, findByTestId, findByLabelText, queryByText } = await renderScreen();
+    const { findByText, findByTestId } = await renderScreen();
+    await findByTestId('empty-hero');
+
+    fireEvent.press(await findByText('Add a drill'));
+
+    expect(await findByTestId('add-a-drill-row-w1')).toBeTruthy();
+  });
+
+  it('picking a drill from the sheet enters that drill\'s inline entry mode', async () => {
+    const drill = makeDrill({ id: 'w1', name: 'Wall rally', metric: 'reps' });
+    mockListDrills.mockResolvedValue([drill]);
+    mockGetActiveSession.mockResolvedValue({ session: makeSession(), entries: [] });
+    mockGetRoutine.mockResolvedValue(null);
+
+    const { findByText, findByTestId, findByLabelText } = await renderScreen();
+    await findByTestId('empty-hero');
 
     fireEvent.press(await findByText('Add a drill'));
     fireEvent.press(await findByTestId('add-a-drill-row-w1'));
 
-    // Entry mode surface for the picked drill is now visible (reps input mode)…
     expect(await findByLabelText('reps-input')).toBeTruthy();
-    // …and the picker CTA is gone — entry mode replaces the picker (per
-    // docs/conventions/primary-vs-annex.md § The unit: mode-screen).
-    expect(queryByText('Add a drill')).toBeNull();
-  });
-
-  it('does not render the old inline drill picker on the picker mode-screen', async () => {
-    // Per ticket #20: "Old inline add path removed from the picker". The
-    // library-of-drills grid used to sit inline; it now lives inside the sheet.
-    const drill = makeDrill({ id: 'w1', name: 'Wall rally', category: 'wall' });
-    mockListDrills.mockResolvedValue([drill]);
-
-    const { queryByTestId } = await renderScreen();
-    await act(async () => {});
-
-    expect(queryByTestId('pick-drill-w1')).toBeNull();
+    expect(await findByTestId('focus-hero')).toBeTruthy();
   });
 });
 
+describe('InSessionScreen — fused planned-slot list and up-next', () => {
+  beforeEach(resetMocks);
 
-describe('InSessionScreen — fused planned-slot list', () => {
-  beforeEach(() => {
-    mockListDrills.mockReset();
-    mockGetActiveSession.mockReset();
-    mockLogEntry.mockReset();
-    mockGetRoutine.mockReset();
-    mockEndSession.mockReset();
-    mockUpdateEntry.mockReset();
-    mockUpdateEntry.mockResolvedValue(undefined as any);
-    mockDeleteEntry.mockReset();
-    mockDeleteEntry.mockResolvedValue(undefined as any);
-    mockActivateKeepAwake.mockReset();
-    mockActivateKeepAwake.mockResolvedValue(undefined);
-    mockDeactivateKeepAwake.mockReset();
-    mockLogEntry.mockResolvedValue(makeEntry());
-    mockEndSession.mockResolvedValue(undefined as any);
-    mockAddADrillSheetProps.length = 0;
-  });
-
-  function seedRoutine({
-    plannedSets = 3 as number | null,
-    drillTarget = null as number | null,
-    entries = [] as DrillEntry[],
-    itemId = 'ri-1',
-    drillId = 'd-1',
-  } = {}) {
-    const drill = makeDrill({
-      id: drillId,
-      name: 'Wall rally',
-      metric: 'reps',
-      target: drillTarget,
-    });
-    mockListDrills.mockResolvedValue([drill]);
-    mockGetActiveSession.mockResolvedValue({
-      session: makeSession({ id: 'session-1', routineId: 'r-1' }),
-      entries,
-    });
-    mockGetRoutine.mockResolvedValue({
-      routine: { id: 'r-1', name: 'R', createdAt: NOW, updatedAt: NOW, deletedAt: null } as any,
-      items: [
-        {
-          id: itemId,
-          routineId: 'r-1',
-          drillId,
-          plannedSets,
-          position: 0,
-          createdAt: NOW,
-          updatedAt: NOW,
-          deletedAt: null,
-        } as any,
-      ],
-    });
-    return drill;
-  }
-
-  it('renders one row per planned set: plannedSets:3 → 3 distinct rows', async () => {
-    seedRoutine({ plannedSets: 3 });
+  it('unfilled planned slots (other than the focused one) appear as up-next chips', async () => {
+    seedRoutine({ plannedSets: 3, drillMetric: 'reps' });
 
     const { findByTestId } = await renderScreen();
 
-    expect(await findByTestId('planned-slot-ri-1-0')).toBeTruthy();
-    expect(await findByTestId('planned-slot-ri-1-1')).toBeTruthy();
-    expect(await findByTestId('planned-slot-ri-1-2')).toBeTruthy();
+    expect(await findByTestId('up-next-ri-1-1')).toBeTruthy();
+    expect(await findByTestId('up-next-ri-1-2')).toBeTruthy();
   });
 
-  it('tapping an empty slot opens the drill\'s entry mode', async () => {
-    seedRoutine({ plannedSets: 2 });
-
-    const { findByTestId, findByLabelText } = await renderScreen();
-
-    fireEvent.press(await findByTestId('planned-slot-ri-1-0'));
-
-    // Reps entry mode surfaces the reps-input.
-    expect(await findByLabelText('reps-input')).toBeTruthy();
-  });
-
-  it('tapping a filled slot opens entry mode with the logged value prefilled; Save updates in place', async () => {
+  it('tapping an up-next chip shifts focus to that slot', async () => {
     seedRoutine({
       plannedSets: 2,
+      drillMetric: 'reps',
+      drillTarget: 50,
+    });
+
+    const { findByTestId, findByLabelText, queryByTestId } = await renderScreen();
+    await findByTestId('up-next-ri-1-1');
+
+    await act(async () => {
+      fireEvent.press(await findByTestId('up-next-ri-1-1'));
+    });
+
+    expect(await findByLabelText('reps-input')).toBeTruthy();
+    expect(queryByTestId('up-next-ri-1-1')).toBeNull();
+    expect(await findByTestId('up-next-ri-1-0')).toBeTruthy();
+  });
+
+  it('saving an entry auto-advances focus to the next unfilled slot', async () => {
+    seedRoutine({ plannedSets: 2, drillMetric: 'reps', drillTarget: 50 });
+
+    mockGetActiveSession
+      .mockResolvedValueOnce({
+        session: makeSession({ id: 'session-1', routineId: 'r-1' }),
+        entries: [],
+      })
+      .mockResolvedValue({
+        session: makeSession({ id: 'session-1', routineId: 'r-1' }),
+        entries: [makeEntry({ id: 'e-new', drillId: 'd-1', value: 50 })],
+      });
+
+    const { findByTestId, findByLabelText } = await renderScreen();
+    await findByTestId('focus-hero');
+    await findByTestId('up-next-ri-1-1');
+
+    await act(async () => {
+      fireEvent.press(await findByLabelText('Save'));
+      await new Promise((res) => setImmediate(res));
+    });
+
+    expect(mockLogEntry).toHaveBeenCalledWith(
+      null,
+      expect.objectContaining({ sessionId: 'session-1', drillId: 'd-1', value: 50 })
+    );
+
+    await waitFor(async () => {
+      expect(await findByTestId('done-planned-ri-1-0')).toBeTruthy();
+    });
+  });
+
+  it('tapping a done row opens the edit sheet for that entry', async () => {
+    seedRoutine({
+      plannedSets: 2,
+      drillMetric: 'reps',
       entries: [makeEntry({ id: 'e-1', drillId: 'd-1', value: 42 })],
     });
 
-    const { findByTestId, findByText, findByLabelText } = await renderScreen();
+    const { findByTestId, findByLabelText } = await renderScreen();
+    await findByTestId('done-planned-ri-1-0');
 
-    const slot = await findByTestId('planned-slot-ri-1-0');
-    fireEvent.press(slot);
-    const input = await findByLabelText('reps-input');
-    expect(input.props.value).toBe('42');
-
-    // Change value + Save must UPDATE, not INSERT — logEntry must not be called;
-    // updateEntry MUST be called with the target entry id and the new value.
-    fireEvent.changeText(input, '99');
-    const saveButton = await findByText('Save');
     await act(async () => {
-      fireEvent.press(saveButton);
+      fireEvent.press(await findByTestId('done-planned-ri-1-0'));
+    });
+
+    const input = await findByLabelText('edit-value-input');
+    expect(input.props.value).toBe('42');
+  });
+
+  it('the edit sheet Save button updates the entry in place (updateEntry, not logEntry)', async () => {
+    seedRoutine({
+      plannedSets: 1,
+      drillMetric: 'reps',
+      entries: [makeEntry({ id: 'e-1', drillId: 'd-1', value: 42 })],
+    });
+
+    const { findByTestId, findByLabelText } = await renderScreen();
+    await findByTestId('done-planned-ri-1-0');
+
+    await act(async () => {
+      fireEvent.press(await findByTestId('done-planned-ri-1-0'));
+    });
+
+    const input = await findByLabelText('edit-value-input');
+    await act(async () => {
+      fireEvent.changeText(input, '99');
+    });
+
+    await act(async () => {
+      fireEvent.press(await findByTestId('edit-save'));
       await new Promise((res) => setImmediate(res));
     });
+
     expect(mockLogEntry).not.toHaveBeenCalled();
     expect(mockUpdateEntry).toHaveBeenCalledWith(
       null,
@@ -616,10 +618,68 @@ describe('InSessionScreen — fused planned-slot list', () => {
     );
   });
 
-  it('ad-hoc entries render in a distinct second section below the planned list', async () => {
-    // 1 planned slot for the routine drill (d-1), 1 entry filling it, and 1
-    // entry for a drill outside the routine — it must appear in the ad-hoc
-    // second section under a clearly-different label.
+  it('the edit sheet Remove button asks for confirmation before deleting', async () => {
+    seedRoutine({
+      plannedSets: 1,
+      drillMetric: 'reps',
+      entries: [makeEntry({ id: 'e-1', drillId: 'd-1', value: 42 })],
+    });
+
+    const { findByTestId, queryByTestId } = await renderScreen();
+    await findByTestId('done-planned-ri-1-0');
+
+    await act(async () => {
+      fireEvent.press(await findByTestId('done-planned-ri-1-0'));
+    });
+
+    await act(async () => {
+      fireEvent.press(await findByTestId('edit-remove'));
+    });
+
+    // Tapping "Remove" arms the DeleteSlotConfirm modal; no delete yet.
+    expect(mockDeleteEntry).not.toHaveBeenCalled();
+    expect(await findByTestId('delete-slot-confirm')).toBeTruthy();
+
+    // Cancel the confirm — entry is still there.
+    await act(async () => {
+      fireEvent.press(await findByTestId('delete-slot-cancel'));
+    });
+    expect(mockDeleteEntry).not.toHaveBeenCalled();
+    expect(queryByTestId('delete-slot-confirm')).toBeNull();
+
+    // Re-open, confirm — now delete fires.
+    await act(async () => {
+      fireEvent.press(await findByTestId('done-planned-ri-1-0'));
+    });
+    await act(async () => {
+      fireEvent.press(await findByTestId('edit-remove'));
+    });
+    await act(async () => {
+      fireEvent.press(await findByTestId('delete-slot-confirm'));
+      await new Promise((res) => setImmediate(res));
+    });
+    expect(mockDeleteEntry).toHaveBeenCalledWith(null, 'e-1', expect.anything());
+  });
+
+  it('"Delete slot" on an empty focused slot drops it silently (no confirm)', async () => {
+    seedRoutine({ plannedSets: 3, drillMetric: 'reps' });
+
+    const { findByTestId, queryByTestId } = await renderScreen();
+    await findByTestId('focus-hero');
+    expect(await findByTestId('up-next-ri-1-1')).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.press(await findByTestId('focus-delete'));
+    });
+
+    // No confirm modal — the slot was empty.
+    expect(queryByTestId('delete-slot-confirm')).toBeNull();
+    expect(mockDeleteEntry).not.toHaveBeenCalled();
+    expect(queryByTestId('up-next-ri-1-0')).toBeNull();
+    expect(await findByTestId('up-next-ri-1-2')).toBeTruthy();
+  });
+
+  it('ad-hoc entries render in the AD-HOC section with distinct testIDs', async () => {
     const routineDrill = makeDrill({ id: 'd-1', name: 'Wall rally' });
     const unplanned = makeDrill({ id: 'd-2', name: 'Slice serve' });
     mockListDrills.mockResolvedValue([routineDrill, unplanned]);
@@ -648,103 +708,31 @@ describe('InSessionScreen — fused planned-slot list', () => {
 
     const { findByTestId, findByText } = await renderScreen();
 
-    // Planned section still exists and contains slot-0 for the routine drill.
-    expect(await findByTestId('planned-slot-ri-1-0')).toBeTruthy();
-    // Ad-hoc section header is present.
-    expect(await findByText(/ad[- ]hoc/i)).toBeTruthy();
-    // The ad-hoc entry has its own row + value display.
-    expect(await findByTestId('adhoc-entry-e-2')).toBeTruthy();
-    // The planned-slot entry (e-1) is NOT in the ad-hoc section.
-    // If it were, we'd have a duplicate testID collision.
-  });
-
-  it('Delete on an empty slot silently removes just that slot; siblings intact', async () => {
-    seedRoutine({ plannedSets: 3 });
-
-    const { findByTestId, queryByTestId } = await renderScreen();
-
-    // All three slot rows are initially present.
-    expect(await findByTestId('planned-slot-ri-1-0')).toBeTruthy();
-    expect(await findByTestId('planned-slot-ri-1-1')).toBeTruthy();
-    expect(await findByTestId('planned-slot-ri-1-2')).toBeTruthy();
-
-    // Tap Delete on slot 1 — no confirm expected on empty rows.
-    await act(async () => {
-      fireEvent.press(await findByTestId('planned-slot-ri-1-1-delete'));
-    });
-
-    // Slot 1 is gone; 0 and 2 remain.
-    expect(queryByTestId('planned-slot-ri-1-1')).toBeNull();
-    expect(await findByTestId('planned-slot-ri-1-0')).toBeTruthy();
-    expect(await findByTestId('planned-slot-ri-1-2')).toBeTruthy();
-  });
-
-  it('Delete on a filled slot requires a confirm-tap; second tap deletes the entry', async () => {
-    seedRoutine({
-      plannedSets: 1,
-      entries: [makeEntry({ id: 'e-1', drillId: 'd-1', value: 42 })],
-    });
-
-    const { findByTestId } = await renderScreen();
-
-    // First tap arms the confirm — deleteEntry MUST NOT fire yet.
-    const deleteButton = await findByTestId('planned-slot-ri-1-0-delete');
-    await act(async () => {
-      fireEvent.press(deleteButton);
-    });
-    expect(mockDeleteEntry).not.toHaveBeenCalled();
-
-    // The armed row exposes a confirm affordance the first tap did not.
-    const confirm = await findByTestId('planned-slot-ri-1-0-delete-confirm');
-    expect(confirm).toBeTruthy();
-
-    // Second tap on the confirm affordance erases the entry.
-    await act(async () => {
-      fireEvent.press(confirm);
-      await new Promise((res) => setImmediate(res));
-    });
-    expect(mockDeleteEntry).toHaveBeenCalledWith(null, 'e-1', expect.anything());
-  });
-
-  it('the legacy LOGGED SO FAR block is no longer rendered on the picker', async () => {
-    // AC: "LOGGED SO FAR block from the current picker is removed".
-    seedRoutine({
-      plannedSets: 2,
-      entries: [makeEntry({ id: 'e-1', drillId: 'd-1', value: 42 })],
-    });
-
-    const { findByText, queryByText } = await renderScreen();
-    await findByText('What are you working on?');
-
-    expect(queryByText(/logged so far/i)).toBeNull();
+    expect(await findByTestId('done-planned-ri-1-0')).toBeTruthy();
+    expect(await findByTestId('done-adhoc-e-2')).toBeTruthy();
+    // Labeled section headers per primary-vs-annex.md § InSession fusion detail.
+    expect(await findByText('DONE — PLANNED')).toBeTruthy();
+    expect(await findByText('AD-HOC')).toBeTruthy();
   });
 
   it('filled slot displays the logged reps value in tabular-nums', async () => {
     seedRoutine({
       plannedSets: 2,
+      drillMetric: 'reps',
       entries: [makeEntry({ id: 'e-1', drillId: 'd-1', value: 42 })],
     });
 
     const { findByTestId } = await renderScreen();
 
-    const slot0 = await findByTestId('planned-slot-ri-1-0');
-    // Filled-row value renders in tabular-nums per AC. The reps unit is included
-    // to match how the picker already formats values in the LOGGED SO FAR block.
-    const value = await findByTestId('planned-slot-ri-1-0-value');
+    const value = await findByTestId('done-planned-ri-1-0-value');
     expect(value).toBeTruthy();
-    // The rendered text must contain the raw number 42 (independent literal).
     const flat = JSON.stringify(value.props);
     expect(flat).toMatch(/42/);
-    // And it must be styled with tabular-nums.
     const flatFonts = JSON.stringify(value.props.style);
     expect(flatFonts).toMatch(/tabular-nums/);
-    // Slot 1 (empty) has no value node.
-    expect(slot0).toBeTruthy();
   });
 });
 
-// Pressable's `style` prop is a function `({pressed}) => styles[]`. Resolve it
-// to a flat style object so tests can assert on the composed backgroundColor.
 function resolveButtonBackground(pressable: any): string | undefined {
   const raw =
     typeof pressable.props.style === 'function'
@@ -755,104 +743,47 @@ function resolveButtonBackground(pressable: any): string | undefined {
 }
 
 describe('InSessionScreen — state-driven accent on primary action (issue #25)', () => {
-  beforeEach(() => {
-    mockListDrills.mockReset();
-    mockGetActiveSession.mockReset();
-    mockLogEntry.mockReset();
-    mockGetRoutine.mockReset();
-    mockEndSession.mockReset();
-    mockUpdateEntry.mockReset();
-    mockUpdateEntry.mockResolvedValue(undefined as any);
-    mockDeleteEntry.mockReset();
-    mockDeleteEntry.mockResolvedValue(undefined as any);
-    mockActivateKeepAwake.mockReset();
-    mockActivateKeepAwake.mockResolvedValue(undefined);
-    mockDeactivateKeepAwake.mockReset();
-    mockGetActiveSession.mockResolvedValue({ session: makeSession(), entries: [] });
-    mockLogEntry.mockResolvedValue(makeEntry());
-    mockGetRoutine.mockResolvedValue(null);
-    mockEndSession.mockResolvedValue(undefined as any);
-    mockAddADrillSheetProps.length = 0;
-  });
+  beforeEach(resetMocks);
 
   it('reps mode hero shows the draft value and updates as the user edits it', async () => {
-    // The draft pre-fills with the drill target per PRD #25 ("default to Target
-    // when set, so I have less to type") — so hero starts at "50". The essential
-    // check is that hero tracks the *draft*, not the target: editing the input
-    // moves the hero, unlike the pre-refactor behaviour where hero was locked
-    // to `target` and never updated.
-    const drill = makeDrill({
-      id: 'reps-hero',
-      name: 'Serve reps',
-      metric: 'reps',
-      target: 50,
-    });
-    mockListDrills.mockResolvedValue([drill]);
+    seedRoutine({ plannedSets: 1, drillMetric: 'reps', drillId: 'd-1', drillTarget: 50 });
 
-    const { findByTestId, findByText, findByLabelText } = await renderScreen();
-    fireEvent.press(await findByText('Add a drill'));
-    fireEvent.press(await findByTestId('add-a-drill-row-reps-hero'));
+    const { findByTestId, findByLabelText } = await renderScreen();
 
     let hero = await findByTestId('reps-hero-readout');
     expect(JSON.stringify(hero.props)).toMatch(/\b50\b/);
-    // heroDigits size = 112 sp per aesthetic-direction.md § Type-scale sketch.
     expect(JSON.stringify(hero.props.style)).toMatch(/"fontSize":112/);
 
-    // Editing the input moves the hero — proves the hero reads from the draft,
-    // not from `pickedDrill.target`.
     fireEvent.changeText(await findByLabelText('reps-input'), '37');
     hero = await findByTestId('reps-hero-readout');
     expect(JSON.stringify(hero.props)).toMatch(/\b37\b/);
   });
 
   it('reps mode renders a progress track + TARGET/REMAINING/RATE stat chips when the drill has a target', async () => {
-    const drill = makeDrill({
-      id: 'reps-t',
-      name: 'Serve reps',
-      metric: 'reps',
-      target: 50,
-    });
-    mockListDrills.mockResolvedValue([drill]);
+    seedRoutine({ plannedSets: 1, drillMetric: 'reps', drillId: 'd-1', drillTarget: 50 });
 
-    const { findByTestId, findByText, findByLabelText, getByText } = await renderScreen();
-    fireEvent.press(await findByText('Add a drill'));
-    fireEvent.press(await findByTestId('add-a-drill-row-reps-t'));
+    const { findByTestId, findByLabelText, getByText } = await renderScreen();
 
     expect(await findByTestId('reps-progress-track')).toBeTruthy();
-    // Stat chips: TARGET / REMAINING / RATE per spec.
     expect(getByText('TARGET')).toBeTruthy();
     expect(getByText('REMAINING')).toBeTruthy();
     expect(getByText('RATE')).toBeTruthy();
 
-    // TARGET chip = 50 (drill target, independent literal from setup).
     const targetChip = await findByTestId('reps-target-chip-value');
     expect(JSON.stringify(targetChip.props)).toMatch(/\b50\b/);
 
-    // Clear the pre-filled draft (PRD #25) so REMAINING and RATE take on
-    // meaningful "in-progress" values rather than the pre-fill == target case.
     fireEvent.changeText(await findByLabelText('reps-input'), '20');
 
-    // REMAINING = 50 - 20 = 30.
     const remainingChip = await findByTestId('reps-remaining-chip-value');
     expect(JSON.stringify(remainingChip.props)).toMatch(/\b30\b/);
-    // RATE = 20 / 50 = 40%.
     const rateChip = await findByTestId('reps-rate-chip-value');
     expect(JSON.stringify(rateChip.props)).toMatch(/40%/);
   });
 
   it('reps mode omits the progress track and stat chips when the drill has no target', async () => {
-    const drill = makeDrill({
-      id: 'reps-nt',
-      name: 'Serve reps',
-      metric: 'reps',
-      target: null,
-    });
-    mockListDrills.mockResolvedValue([drill]);
+    seedRoutine({ plannedSets: 1, drillMetric: 'reps', drillId: 'd-1', drillTarget: null });
 
-    const { findByTestId, findByText, queryByTestId, queryByText } = await renderScreen();
-    fireEvent.press(await findByText('Add a drill'));
-    fireEvent.press(await findByTestId('add-a-drill-row-reps-nt'));
-    // Wait for reps entry mode.
+    const { findByTestId, queryByTestId, queryByText } = await renderScreen();
     await findByTestId('reps-hero-readout');
 
     expect(queryByTestId('reps-progress-track')).toBeNull();
@@ -861,122 +792,78 @@ describe('InSessionScreen — state-driven accent on primary action (issue #25)'
   });
 
   it('reps Save button fill follows the state-driven accent as the draft value crosses target thresholds', async () => {
-    const drill = makeDrill({
-      id: 'reps-acc',
-      name: 'Serve reps',
-      metric: 'reps',
-      target: 100,
-    });
-    mockListDrills.mockResolvedValue([drill]);
+    seedRoutine({ plannedSets: 1, drillMetric: 'reps', drillId: 'd-1', drillTarget: 100 });
 
-    const { findByTestId, findByText, findByLabelText } = await renderScreen();
-    fireEvent.press(await findByText('Add a drill'));
-    fireEvent.press(await findByTestId('add-a-drill-row-reps-acc'));
+    const { findByTestId, findByLabelText } = await renderScreen();
 
     const input = await findByLabelText('reps-input');
 
-    // 50 / 100 = 50% → cyan (on-track).
     fireEvent.changeText(input, '50');
-    let save = await findByTestId('primary-action');
-    expect(resolveButtonBackground(save)).toBe(colors.accent);
+    expect(resolveButtonBackground(await findByTestId('primary-action'))).toBe(colors.accent);
 
-    // 95 / 100 = 95% → amber (approaching).
     fireEvent.changeText(input, '95');
-    save = await findByTestId('primary-action');
-    expect(resolveButtonBackground(save)).toBe(colors.accentAmber);
+    expect(resolveButtonBackground(await findByTestId('primary-action'))).toBe(colors.accentAmber);
 
-    // 120 / 100 = 120% → magenta (over).
     fireEvent.changeText(input, '120');
-    save = await findByTestId('primary-action');
-    expect(resolveButtonBackground(save)).toBe(colors.accentMagenta);
+    expect(resolveButtonBackground(await findByTestId('primary-action'))).toBe(colors.accentMagenta);
   });
 
   it('state-driven accent boundaries are inclusive at 90% (amber) and 100% (magenta)', async () => {
-    // Guards `>=` vs `>` in stateAccentFor — a flip at either edge would
-    // silently violate the aesthetic-direction thresholds.
-    const drill = makeDrill({
-      id: 'reps-bnd',
-      name: 'Serve reps',
-      metric: 'reps',
-      target: 100,
-    });
-    mockListDrills.mockResolvedValue([drill]);
+    seedRoutine({ plannedSets: 1, drillMetric: 'reps', drillId: 'd-1', drillTarget: 100 });
 
-    const { findByTestId, findByText, findByLabelText } = await renderScreen();
-    fireEvent.press(await findByText('Add a drill'));
-    fireEvent.press(await findByTestId('add-a-drill-row-reps-bnd'));
+    const { findByTestId, findByLabelText } = await renderScreen();
 
     const input = await findByLabelText('reps-input');
 
-    // 89% → still cyan (just below the 90% threshold).
     fireEvent.changeText(input, '89');
     expect(resolveButtonBackground(await findByTestId('primary-action'))).toBe(colors.accent);
 
-    // 90% → amber (boundary is inclusive at 0.9).
     fireEvent.changeText(input, '90');
     expect(resolveButtonBackground(await findByTestId('primary-action'))).toBe(colors.accentAmber);
 
-    // 99% → still amber (just below the 100% threshold).
     fireEvent.changeText(input, '99');
     expect(resolveButtonBackground(await findByTestId('primary-action'))).toBe(colors.accentAmber);
 
-    // 100% → magenta (boundary is inclusive at 1.0).
     fireEvent.changeText(input, '100');
     expect(resolveButtonBackground(await findByTestId('primary-action'))).toBe(colors.accentMagenta);
   });
 
   it('accuracy mode renders hero pct + progress track + TARGET/REMAINING/RATE chips; Save follows state accent', async () => {
-    const drill = makeDrill({
-      id: 'acc-1',
-      name: 'Serve accuracy',
-      metric: 'accuracy',
-      target: 80,
+    seedRoutine({
+      plannedSets: 1,
+      drillMetric: 'accuracy',
+      drillId: 'd-1',
+      drillTarget: 80,
     });
-    mockListDrills.mockResolvedValue([drill]);
 
-    const { findByTestId, findByText, findByLabelText } = await renderScreen();
-    fireEvent.press(await findByText('Add a drill'));
-    fireEvent.press(await findByTestId('add-a-drill-row-acc-1'));
+    const { findByTestId, findByLabelText } = await renderScreen();
 
     fireEvent.changeText(await findByLabelText('accuracy-value-input'), '17');
     fireEvent.changeText(await findByLabelText('accuracy-attempted-input'), '20');
 
-    // 17 / 20 = 85% → hero shows "85%".
     const hero = await findByTestId('accuracy-hero-readout');
     expect(JSON.stringify(hero.props)).toMatch(/85%/);
     expect(await findByTestId('accuracy-progress-track')).toBeTruthy();
 
-    // TARGET chip shows the drill target (80%).
     const targetChip = await findByTestId('accuracy-target-chip-value');
     expect(JSON.stringify(targetChip.props)).toMatch(/80%/);
 
-    // RATE chip = pctInt% = round(85/80 * 100) = 106%.
     const rateChip = await findByTestId('accuracy-rate-chip-value');
     expect(JSON.stringify(rateChip.props)).toMatch(/106%/);
 
-    // 85% / 80% target = 106% → magenta.
     const save = await findByTestId('primary-action');
     expect(resolveButtonBackground(save)).toBe(colors.accentMagenta);
   });
 
   it('accuracy mode omits the progress track and stat chips when the drill has no target', async () => {
-    const drill = makeDrill({
-      id: 'acc-nt',
-      name: 'Serve accuracy',
-      metric: 'accuracy',
-      target: null,
+    seedRoutine({
+      plannedSets: 1,
+      drillMetric: 'accuracy',
+      drillId: 'd-1',
+      drillTarget: null,
     });
-    mockListDrills.mockResolvedValue([drill]);
 
-    const {
-      findByTestId,
-      findByText,
-      findByLabelText,
-      queryByTestId,
-      queryByText,
-    } = await renderScreen();
-    fireEvent.press(await findByText('Add a drill'));
-    fireEvent.press(await findByTestId('add-a-drill-row-acc-nt'));
+    const { findByLabelText, queryByTestId, queryByText } = await renderScreen();
     await findByLabelText('accuracy-value-input');
 
     expect(queryByTestId('accuracy-progress-track')).toBeNull();
@@ -985,28 +872,21 @@ describe('InSessionScreen — state-driven accent on primary action (issue #25)'
   });
 
   it('duration Stop button switches to the magenta accent once elapsed ≥ 100% of target', async () => {
-    // Target 100 s; advance clock to 120 s → pct ≥ 1 → magenta.
-    // Aesthetic-direction § state-driven accent rule.
-    const drill = makeDrill({
-      id: 'dur-mag',
-      name: 'Wall rally',
-      metric: 'duration',
-      target: 100,
+    seedRoutine({
+      plannedSets: 1,
+      drillMetric: 'duration',
+      drillId: 'd-1',
+      drillTarget: 100,
     });
-    mockListDrills.mockResolvedValue([drill]);
 
     let ticks = 0;
     const clock = () => new Date(Date.parse(NOW) + ticks);
 
-    const { findByTestId, findByText } = await renderScreen({ clock });
-    fireEvent.press(await findByText('Add a drill'));
-    fireEvent.press(await findByTestId('add-a-drill-row-dur-mag'));
+    const { findByTestId, findByLabelText } = await renderScreen({ clock });
 
-    fireEvent.press(await findByText('Start'));
+    fireEvent.press(await findByLabelText('Start'));
     ticks = 120_000;
 
-    // setInterval re-renders every 500 ms; waitFor polls until the primary-
-    // action button reflects the over-target accent (magenta).
     await waitFor(async () => {
       const btn = await findByTestId('primary-action');
       expect(resolveButtonBackground(btn)).toBe(colors.accentMagenta);
@@ -1015,26 +895,12 @@ describe('InSessionScreen — state-driven accent on primary action (issue #25)'
 });
 
 describe('InSessionScreen — unfilled-slots modal at End Session', () => {
-  beforeEach(() => {
-    mockListDrills.mockReset();
-    mockGetActiveSession.mockReset();
-    mockLogEntry.mockReset();
-    mockGetRoutine.mockReset();
-    mockEndSession.mockReset();
-    mockActivateKeepAwake.mockReset();
-    mockActivateKeepAwake.mockResolvedValue(undefined);
-    mockDeactivateKeepAwake.mockReset();
-    mockLogEntry.mockResolvedValue(makeEntry());
-    mockEndSession.mockResolvedValue(undefined as any);
-    mockAddADrillSheetProps.length = 0;
-    modalProps.length = 0;
-  });
+  beforeEach(resetMocks);
 
   async function tapEndSessionInSheet(findByTestId: (id: string) => Promise<any>) {
-    await pressHeaderMenu();
+    await pressSessionMenu(findByTestId);
     await act(async () => {
       fireEvent.press(await findByTestId('session-menu-end-session'));
-      // Give the async chain that opens the modal a tick to settle.
       await new Promise((res) => setImmediate(res));
     });
   }
@@ -1044,74 +910,48 @@ describe('InSessionScreen — unfilled-slots modal at End Session', () => {
     plannedSets = 2 as number | null,
     entries = [] as DrillEntry[],
   } = {}) {
-    const drill = makeDrill({
-      id: 'd-1',
-      name: 'Wall rally',
-      metric: 'reps',
-      target: drillTarget,
-    });
-    mockListDrills.mockResolvedValue([drill]);
-    mockGetActiveSession.mockResolvedValue({
-      session: makeSession({ id: 'session-1', routineId: 'r-1' }),
+    return seedRoutine({
+      plannedSets,
+      drillMetric: 'reps',
+      drillTarget,
       entries,
     });
-    mockGetRoutine.mockResolvedValue({
-      routine: { id: 'r-1', name: 'R', createdAt: NOW, updatedAt: NOW, deletedAt: null } as any,
-      items: [
-        {
-          id: 'ri-1',
-          routineId: 'r-1',
-          drillId: 'd-1',
-          plannedSets,
-          position: 0,
-          createdAt: NOW,
-          updatedAt: NOW,
-          deletedAt: null,
-        } as any,
-      ],
-    });
-    return drill;
   }
 
   it('ends the session directly when there are no unfilled planned slots', async () => {
-    // No routine → no plannedItems → no unfilled slots.
     mockGetActiveSession.mockResolvedValue({ session: makeSession(), entries: [] });
     mockGetRoutine.mockResolvedValue(null);
     mockListDrills.mockResolvedValue([]);
 
-    const { findByText, findByTestId, queryByText } = await renderScreen();
-    await findByText('What are you working on?');
+    const { findByTestId, queryByText } = await renderScreen();
+    await findByTestId('empty-hero');
 
     await tapEndSessionInSheet(findByTestId);
 
-    // Modal must NOT appear; session ends and nav.goBack() fires.
     expect(queryByText(/complete/i)).toBeNull();
     expect(mockEndSession).toHaveBeenCalledWith(null, 'session-1', expect.anything());
-    expect(currentNavigation!.goBack).toHaveBeenCalled();
+    expect(onCloseSpy).toHaveBeenCalled();
   });
 
   it('opens the modal instead of ending when at least one planned slot is unfilled', async () => {
     seedRoutineWithUnfilled();
 
-    const { findByText, findByTestId, queryByText } = await renderScreen();
-    await findByText('What are you working on?');
+    const { findByText, findByTestId } = await renderScreen();
+    await findByTestId('focus-hero');
 
     await tapEndSessionInSheet(findByTestId);
 
-    // Both action affordances of the modal are visible.
     expect(await findByText(/complete to target/i)).toBeTruthy();
     expect(await findByText(/skip all/i)).toBeTruthy();
-    // Session has NOT been ended yet.
     expect(mockEndSession).not.toHaveBeenCalled();
-    expect(currentNavigation!.goBack).not.toHaveBeenCalled();
-    expect(queryByText('What are you working on?')).toBeTruthy();
+    expect(onCloseSpy).not.toHaveBeenCalled();
   });
 
   it('Complete-to-target logs one entry per unfilled slot at the drill target, then ends the session', async () => {
     seedRoutineWithUnfilled({ drillTarget: 20, plannedSets: 2 });
 
     const { findByText, findByTestId } = await renderScreen();
-    await findByText('What are you working on?');
+    await findByTestId('focus-hero');
     await tapEndSessionInSheet(findByTestId);
 
     await act(async () => {
@@ -1119,7 +959,6 @@ describe('InSessionScreen — unfilled-slots modal at End Session', () => {
       await new Promise((res) => setImmediate(res));
     });
 
-    // 2 unfilled slots × drill.target(20) → 2 logEntry calls, both value=20.
     expect(mockLogEntry).toHaveBeenCalledTimes(2);
     expect(mockLogEntry.mock.calls[0][1]).toEqual(
       expect.objectContaining({ sessionId: 'session-1', drillId: 'd-1', value: 20 })
@@ -1128,14 +967,14 @@ describe('InSessionScreen — unfilled-slots modal at End Session', () => {
       expect.objectContaining({ sessionId: 'session-1', drillId: 'd-1', value: 20 })
     );
     expect(mockEndSession).toHaveBeenCalledWith(null, 'session-1', expect.anything());
-    expect(currentNavigation!.goBack).toHaveBeenCalled();
+    expect(onCloseSpy).toHaveBeenCalled();
   });
 
   it('Skip all ends the session without logging any new entries', async () => {
     seedRoutineWithUnfilled({ drillTarget: 20, plannedSets: 2 });
 
     const { findByText, findByTestId } = await renderScreen();
-    await findByText('What are you working on?');
+    await findByTestId('focus-hero');
     await tapEndSessionInSheet(findByTestId);
 
     await act(async () => {
@@ -1145,25 +984,156 @@ describe('InSessionScreen — unfilled-slots modal at End Session', () => {
 
     expect(mockLogEntry).not.toHaveBeenCalled();
     expect(mockEndSession).toHaveBeenCalledWith(null, 'session-1', expect.anything());
-    expect(currentNavigation!.goBack).toHaveBeenCalled();
+    expect(onCloseSpy).toHaveBeenCalled();
   });
 
-  it('hardware back on the modal cancels: session stays active, still on InSession', async () => {
+  it('hardware back on the unfilled modal cancels: session stays active, still in-sheet', async () => {
     seedRoutineWithUnfilled();
 
-    const { findByText, findByTestId } = await renderScreen();
-    await findByText('What are you working on?');
+    const { findByTestId } = await renderScreen();
+    await findByTestId('focus-hero');
     await tapEndSessionInSheet(findByTestId);
 
-    // Simulate Android hardware back — RN Modal fires onRequestClose.
-    const props = modalProps[modalProps.length - 1];
-    act(() => {
-      props.onRequestClose();
+    // Find the modal that carries the unfilled-slots title (multiple modals
+    // mount, only one is currently `visible: true`).
+    const modal = [...modalProps].reverse().find((p) => p.visible);
+    expect(modal).toBeTruthy();
+    await act(async () => {
+      modal!.onRequestClose();
     });
 
     expect(mockEndSession).not.toHaveBeenCalled();
-    expect(currentNavigation!.goBack).not.toHaveBeenCalled();
-    expect(await findByText('What are you working on?')).toBeTruthy();
+    expect(onCloseSpy).not.toHaveBeenCalled();
+    expect(await findByTestId('focus-hero')).toBeTruthy();
   });
 });
 
+describe('InSessionScreen — mid-timer switch confirm modal (replaces Alert.alert)', () => {
+  beforeEach(resetMocks);
+
+  it('opens the archetype-4 modal instead of a native alert when tapping a different slot while a timer runs', async () => {
+    seedRoutine({
+      plannedSets: 2,
+      drillMetric: 'duration',
+      drillId: 'd-1',
+      drillTarget: 60,
+    });
+
+    let ticks = 0;
+    const t0 = Date.parse(NOW);
+    const clock = () => new Date(t0 + ticks);
+
+    const { findByTestId, findByLabelText, findByText } = await renderScreen({ clock });
+    await findByTestId('focus-hero');
+
+    await act(async () => {
+      fireEvent.press(await findByLabelText('Start'));
+    });
+    ticks = 42_000;
+
+    await act(async () => {
+      fireEvent.press(await findByTestId('up-next-ri-1-1'));
+    });
+
+    // Modal is up; message includes the elapsed time.
+    expect(await findByText(/Save 0:42 for Wall rally and switch\?/)).toBeTruthy();
+    expect(await findByTestId('switch-timer-save')).toBeTruthy();
+    expect(await findByTestId('switch-timer-discard')).toBeTruthy();
+    expect(await findByTestId('switch-timer-cancel')).toBeTruthy();
+  });
+
+  it('Save & switch logs the elapsed time and moves focus to the tapped slot', async () => {
+    seedRoutine({
+      plannedSets: 2,
+      drillMetric: 'duration',
+      drillId: 'd-1',
+      drillTarget: 60,
+    });
+
+    let ticks = 0;
+    const t0 = Date.parse(NOW);
+    const clock = () => new Date(t0 + ticks);
+
+    const { findByTestId, findByLabelText } = await renderScreen({ clock });
+    await findByTestId('focus-hero');
+
+    fireEvent.press(await findByLabelText('Start'));
+    ticks = 30_000;
+
+    await act(async () => {
+      fireEvent.press(await findByTestId('up-next-ri-1-1'));
+    });
+
+    await act(async () => {
+      fireEvent.press(await findByTestId('switch-timer-save'));
+      await new Promise((res) => setImmediate(res));
+    });
+
+    expect(mockLogEntry).toHaveBeenCalledWith(
+      null,
+      expect.objectContaining({ drillId: 'd-1', value: 30 })
+    );
+  });
+
+  it('Cancel keeps the timer running and does not log anything', async () => {
+    seedRoutine({
+      plannedSets: 2,
+      drillMetric: 'duration',
+      drillId: 'd-1',
+      drillTarget: 60,
+    });
+
+    let ticks = 0;
+    const t0 = Date.parse(NOW);
+    const clock = () => new Date(t0 + ticks);
+
+    const { findByTestId, findByLabelText, queryByTestId } = await renderScreen({ clock });
+    await findByTestId('focus-hero');
+
+    await act(async () => {
+      fireEvent.press(await findByLabelText('Start'));
+    });
+    ticks = 42_000;
+
+    await act(async () => {
+      fireEvent.press(await findByTestId('up-next-ri-1-1'));
+    });
+
+    await act(async () => {
+      fireEvent.press(await findByTestId('switch-timer-cancel'));
+    });
+
+    // Flush pending state settlements before the test ends.
+    await act(async () => {
+      await new Promise((res) => setImmediate(res));
+    });
+
+    expect(mockLogEntry).not.toHaveBeenCalled();
+    expect(queryByTestId('switch-timer-save')).toBeNull();
+  });
+});
+
+describe('InSessionScreen — finish hero appears when all planned slots are filled', () => {
+  beforeEach(resetMocks);
+
+  it('renders the FinishHero and tapping "Finish session" ends the session', async () => {
+    seedRoutine({
+      plannedSets: 1,
+      drillMetric: 'reps',
+      drillId: 'd-1',
+      entries: [makeEntry({ id: 'e-1', drillId: 'd-1', value: 42 })],
+    });
+
+    const { findByTestId } = await renderScreen();
+
+    expect(await findByTestId('finish-hero')).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.press(await findByTestId('finish-session'));
+      await new Promise((res) => setImmediate(res));
+    });
+
+    expect(mockEndSession).toHaveBeenCalledWith(null, 'session-1', expect.anything());
+    expect(onCloseSpy).toHaveBeenCalled();
+  });
+});

@@ -1,5 +1,5 @@
 import { BaseSQLiteDatabase } from 'drizzle-orm/sqlite-core';
-import { ActiveSessionState, hydrate } from './active-session';
+import { ActiveSessionState, drillFor, hydrate } from './active-session';
 import { logEntry } from './sessions';
 
 type Db = BaseSQLiteDatabase<'sync' | 'async', unknown>;
@@ -35,7 +35,7 @@ export async function completeToTarget(
   opts: { now?: Clock } = {}
 ): Promise<ActiveSessionState> {
   for (const slot of unfilledSlots(state)) {
-    const drill = state.drills.find((d) => d.id === slot.drillId);
+    const drill = drillFor(state, slot.drillId);
     if (!drill || drill.target == null) continue;
     for (let i = 0; i < slot.count; i++) {
       await logEntry(db, {
