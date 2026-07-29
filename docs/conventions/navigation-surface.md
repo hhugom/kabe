@@ -2,6 +2,8 @@
 
 Resolved in issue #8 (part of map #1). **Revised post-#8**: the tab-bar center Start action is retired; Start-a-Session moves back to a hero card at the top of Home. Trigger was a prototype-A/B (see `mobile/src/prototypes/start-session-affordance/README.md` in git history) showing the center-overhang felt visually noisy against the flat Zwift-HUD strip. Sections marked with **Post-#8 revision** below carry the new spec; the retired center-action spec is preserved as a rejected alternative.
 
+**Revised post-ADR-0004**: InSession is no longer a stack-push destination. It's a persistent bottom sheet with PEEK (compact header) and FULL (screen-filling) snap points, rooted at the top of the app tree. See `docs/adr/0004-insession-persistent-workout-sheet.md`. The four screen archetypes below become five; the active-session pill and its RoutineEditor mounting are retired. Sections marked **Post-ADR-0004** carry the new spec.
+
 Where the player's thumb goes for the top actions. This convention decides the tab set, tab implementation, header stance, primary-action placement, back/dismiss behavior, and the four screen archetypes every future screen builds on. Together with #5 (primary vs annex), it settles the "what belongs where" question for the whole app.
 
 ## Tab set
@@ -47,7 +49,7 @@ Retired center-action alternative (and other rejected shapes) captured at the bo
 
 ## Header stance
 
-RN header renders on **stack pushes only.** Tab-roots have no RN header and self-title via in-content Chrome (per #5's vocabulary).
+RN header renders on **stack pushes only.** Tab-roots have no RN header and self-title via in-content Chrome (per #5's vocabulary). InSession is not a stack push (see § Archetype 5 — Persistent workout sheet) and has no RN header; it self-owns a compact in-sheet header row at the top of the sheet body carrying its own three-dot.
 
 Stack-push headers carry three functional slots:
 
@@ -55,40 +57,43 @@ Stack-push headers carry three functional slots:
 - **Middle:** title — small/quiet Chrome for orientation, never the goal statement itself. Always present so the player always knows they can back out.
 - **Right:** header-icon affordance (three-dot menu, per Header-icon affordance below), rendered only when the annex has ≥1 action.
 
-**In-content EntryHeader stays** on InSession modes even though the RN header carries a title. The two answer different questions: the RN header title says *"what screen am I on"* (Session); the in-content EntryHeader says *"what drill am I logging"* (WALL · Wall Warmup). Both are needed and don't compete because the RN title is deliberately small/quiet.
+**Post-ADR-0004.** The stack-push routes that carry this header are RoutineEditor and Drills. InSession is retired from the stack.
 
 **Header background matches screen background** on modes with strong in-content hero content — no elevation line, no separator. This keeps the double-title stack (RN title above in-content eyebrow) reading as continuous instead of stacked-and-heavy.
 
 ## Header-icon affordance (three-dot menu)
 
-Right side of every stack-push header. Icon = **three-dot menu** (universal "more actions" affordance, filled/chunky per #3). Tapping opens the associated annex as a **bottom sheet** (Tamagui `Sheet` primitive).
+Right side of every stack-push header, and right side of InSession's in-sheet header row. Icon = **three-dot menu** (universal "more actions" affordance, filled/chunky per #3). Tapping opens the associated annex as a **bottom sheet** (Tamagui `Sheet` primitive).
 
 **This is a #8 override of #5's default disposal rung** for header-icon menus specifically. #5's default is "annex screen" (a full stack push). Header-icon menus are quick-tap surfaces with 1–3 items (Session menu = End Session; Routine menu = Archive) — a full stack push is over-engineered. Bottom sheet is the right shape: quick in, quick out, preserves context, uses a primitive Tamagui already ships. Not native contextual popup (default OS chrome bleeds through the custom aesthetic).
 
-**Visibility rule.** Icon renders only when the annex has ≥1 action. RoutineEditor in create mode → no icon (nothing to archive yet). RoutineEditor in edit mode → icon appears. InSession → always shows it (End Session always available). An empty header icon that opens an empty sheet is worse than no icon — it invites a wasted tap.
+**Visibility rule.** Icon renders only when the annex has ≥1 action. RoutineEditor in create mode → no icon (nothing to archive yet). RoutineEditor in edit mode → icon appears. InSession → always shows it on the in-sheet header (End Session always available). An empty header icon that opens an empty sheet is worse than no icon — it invites a wasted tap.
+
+**Post-ADR-0004.** InSession's three-dot lives on the in-sheet header row at the top of the sheet body, not on an RN header. The Session menu behaviour is identical.
 
 ## Primary action pattern
 
-On every **stack-push mode-screen**, the primary commit action is a single bottom-anchored, full-width, filled button. If the goal has a canonical exit that isn't the back button (e.g. Cancel), that exit renders as a ghost-variant button *directly below* the primary. All other actions live in the header-icon affordance or in the annex.
+On every **stack-push mode-screen** and inside the **InSession sheet** (archetype 5), the primary commit action is a single bottom-anchored, full-width, filled button. If the goal has a canonical exit that isn't the back button (e.g. Cancel), that exit renders as a ghost-variant button *directly below* the primary. All other actions live in the header-icon affordance or in the annex.
 
 Applied per mode-screen with a discrete commit action:
 
 | Mode-screen | Bottom primary | Bottom cancel |
 |---|---|---|
-| InSession-picker | Add a drill (routes to Add-a-drill sheet) | — |
-| InSession-reps | Save (colour follows #3's state-driven accent) | Cancel (ghost) |
-| InSession-accuracy | Save (colour follows #3's state-driven accent) | Cancel (ghost) |
-| InSession-duration | Start / Stop (morphs on state, colour follows #3's state-driven accent) | Cancel (ghost) |
+| InSession-reps (FocusHero inside the sheet) | Save (colour follows #3's state-driven accent) | Cancel (ghost) |
+| InSession-accuracy (FocusHero inside the sheet) | Save (colour follows #3's state-driven accent) | Cancel (ghost) |
+| InSession-duration (FocusHero inside the sheet) | Start / Stop (morphs on state, colour follows #3's state-driven accent) | Cancel (ghost) |
 | RoutineEditor | Save | — |
 | PickRoutine (sheet) | — (list rows are the action) | — |
 | Add-a-drill (sheet) | — (list rows are the action) | — |
 | Session menu (sheet) | — (rows; End Session is a danger row) | — |
 | Routine menu (sheet) | — (rows; Archive is a danger row) | — |
 
+The FocusHero primary + Cancel row lives *inside the InSession sheet body*, near-bottom of the FocusHero panel — the "bottom-anchored" rule applies within the sheet surface, not the app frame (the sheet fills the surface at FULL).
+
 Two hard rules the pattern enforces:
 
 - **Cancel is kept as a ghost button below primary on entry modes.** Cancel and back are semantically different (Cancel = "throw away this entry's draft", back = "leave the screen"). Merging into just the header back button loses the clean-cancel affordance. Ghost variant keeps it visually secondary.
-- **Danger actions never sit as bottom-anchored primary buttons.** Bottom-anchored primary is the muscle-memory location for "commit the goal"; putting danger there is the exact mis-tap risk #5 warned about. End Session, Archive, and any future destructive action live only as **danger-styled rows inside an annex sheet** — two-step by design.
+- **Danger actions never sit as bottom-anchored primary buttons.** Bottom-anchored primary is the muscle-memory location for "commit the goal"; putting danger there is the exact mis-tap risk #5 warned about. End Session, Archive, per-slot Delete, and any future destructive action live only as **danger-styled rows inside an annex sheet** — two-step by design. Per-slot Delete for a filled slot requires a confirm-tap; empty-slot Delete is a silent one-tap remove (nothing to lose).
 
 ## Back / dismiss convention
 
@@ -97,28 +102,20 @@ Android hardware back is authoritative on every surface. Top-left back on stack 
 | Surface | Top-left back | Hardware back | Other dismiss |
 |---|---|---|---|
 | Tab-root (Home, Routines, Stats) | No | Exits app (standard Android) | — |
-| Stack push (InSession, RoutineEditor) | Yes — chevron-left | Pops stack | — |
+| Stack push (RoutineEditor, Drills) | Yes — chevron-left | Pops stack | — |
 | Bottom sheet (PickRoutine, Add-a-drill, Session menu, Routine menu) | No | Dismisses the sheet | Drag-down; tap-outside backdrop |
-| Modal (unfilled-slots at End Session) | No | Dismisses = Cancel | Explicit action button only |
+| Modal (unfilled-slots at End Session, mid-timer switch prompt, delete-filled confirm) | No | Dismisses = Cancel | Explicit action button only |
+| Persistent workout sheet (InSession) | No | Collapses FULL → PEEK; at PEEK, hardware back falls through to the underlying surface | Drag; tap peek (both toggle PEEK ↔ FULL). No user-driven dismissal — only End Session ends the session. |
 
 **Modals ignore tap-outside.** The unfilled-slots modal requires an explicit choice (complete-to-target or skip). Tap-outside would silently cancel the End Session action if the player mis-taps. Hardware back is the only implicit dismiss, treated as equivalent to Cancel (return to the previous screen; don't end the session).
 
-## Active-session pill (updated from #5, revised post-#8)
+## Active-session pill (RETIRED — see ADR-0004)
 
-The pill spec from #5 (top of screen, immediately below status bar, full-width, `accentAmber`, tap → InSession) stands. Its **rendering rule**:
+The pill (top of screen, `accentAmber`, tap → InSession) is retired. Its job — "surface an active session from any surface, one tap to resume" — is now covered by the persistent InSession sheet PEEK header (archetype 5), which is always visible when a session is active. The pill component is deleted. The Home Start hero's active-session amber morph is redundant with the peek but is out of scope for ADR-0004 — a future ticket may collapse it.
 
-| Surface | Pill? |
-|---|---|
-| Home (tab-root) | No — the Home Start hero morphs to Resume (amber) and covers the same job |
-| Routines / Stats (tab-roots) | **Pending** — v1 ships without the pill on these tab-roots; players resume by tapping Home. Adding the pill here is a candidate follow-up (see Known tensions) |
-| Stack push with RN header (RoutineEditor) | Yes — above the RN header (order: status bar → pill → header → content) |
-| Bottom sheet (PickRoutine, Add-a-drill, Session menu, Routine menu) | No on the sheet itself; whatever's underneath governs pill visibility |
-| Modal | No |
-| InSession modes | No (in-session — tautological, per #5) |
+## Five screen archetypes
 
-## Four screen archetypes
-
-Every future screen fits one of these four shapes. Sketches show placement of thumb-actions.
+Every future screen fits one of these five shapes. Sketches show placement of thumb-actions.
 
 ### Archetype 1 — Tab-root
 Home, Routines, Stats.
@@ -140,13 +137,11 @@ Home, Routines, Stats.
 ```
 
 ### Archetype 2 — Stack push
-InSession modes, RoutineEditor.
+RoutineEditor, Drills.
 
 ```
 ┌──────────────────────────┐
 │ [status bar]             │
-├──────────────────────────┤
-│ ▓ RESUME SESSION ▓ amber │  ← pill (only if session active + non-InSession)
 ├──────────────────────────┤
 │ [<]   Session   [∙∙∙]    │  ← RN header: back / title (Chrome) / three-dot
 ├──────────────────────────┤
@@ -157,9 +152,10 @@ InSession modes, RoutineEditor.
 │                          │
 ├──────────────────────────┤
 │  [   PRIMARY BUTTON  ]   │  ← bottom-anchored, full-width, filled
-│           Cancel         │  ← ghost, entry modes only
 └──────────────────────────┘
 ```
+
+Screens that render bottom-anchored primary actions must reserve `useSessionSheetInset()` pixels of extra bottom padding so the InSession sheet peek doesn't occlude the primary when a session is active. See § Archetype 5.
 
 ### Archetype 3 — Sheet
 PickRoutine (from the Home Start hero), Add-a-drill (from InSession picker), Session menu (from InSession header-icon), Routine menu (from RoutineEditor header-icon).
@@ -181,7 +177,7 @@ PickRoutine (from the Home Start hero), Add-a-drill (from InSession picker), Ses
 ```
 
 ### Archetype 4 — Modal
-Currently only the unfilled-slots modal at End Session. Alert/confirm dialogs (if added later) use this archetype.
+Currently: unfilled-slots modal at End Session, mid-timer save-and-switch prompt (when tapping a different slot while a duration timer is running), delete-filled-slot confirm prompt. Alert/confirm dialogs use this archetype — **not** native `Alert.alert` (OS chrome bleeds through the aesthetic).
 
 ```
 ┌──────────────────────────┐
@@ -198,6 +194,35 @@ Currently only the unfilled-slots modal at End Session. Alert/confirm dialogs (i
 └──────────────────────────┘   Dismiss: modal buttons / hw-back (=Cancel).
                                 Tap-outside is IGNORED.
 ```
+
+### Archetype 5 — Persistent workout sheet
+Currently only InSession. Rooted at the top of the app tree; two snap points (PEEK, FULL); non-modal (underlying surface stays interactive when PEEKed). Mounts when a session is active; unmounts when the session ends. Dismissal is not user-driven — hardware back at FULL collapses to PEEK; only the in-sheet three-dot → End Session ends the session.
+
+```
+                                    (PEEK)
+┌──────────────────────────┐   ┌──────────────────────────┐
+│ [status bar]             │   │ [status bar]             │
+├──────────────────────────┤   ├──────────────────────────┤
+│  ── (drag handle)        │   │  (underlying screen)     │
+│  [∙∙∙] Session   [∙∙∙]   │   │                          │
+│                          │   │                          │
+│  EYEBROW                 │   │                          │
+│  <FocusHero>             │   │                          │
+│  [ Save ]  Cancel        │   ├──────────────────────────┤
+│  UP NEXT: [chip][chip]…  │   │  ── (drag handle)        │
+│  DONE (PLANNED)          │   │  • Wall rally    0:42    │
+│  • rally    12 reps      │   ├──────────────────────────┤
+│  AD-HOC                  │   │  (tab bar if tab-root)   │
+│  • serve    3/5          │   └──────────────────────────┘
+├──────────────────────────┤       tap peek → expand to FULL
+│  (tab bar if tab-root)   │       drag / tap peek → collapse to PEEK
+└──────────────────────────┘
+```
+
+- PEEK sits directly above the tab bar on tab-root routes, and directly above the bottom safe-area on stack-push routes. Bottom-anchored primaries on those routes reserve `useSessionSheetInset()` bottom padding to avoid overlap.
+- The in-sheet header row at the top of the sheet body carries the drag handle + Session title + right-side three-dot menu (opens the Session menu bottom sheet — End Session danger row).
+- FocusHero owns the "one goal per mode-screen" surface (reps / accuracy / duration entry for the currently focused slot). UpNextStrip + DoneList are same-goal peripheral content in the sheet body (see `primary-vs-annex.md` § InSession).
+- The sheet is non-modal by construction — no backdrop dimming, no overlay. Underlying screens stay interactive at PEEK. This is the property that lets the peek surface an active session from every route.
 
 ## Consequences for #5 (updates to primary-vs-annex.md)
 
@@ -220,6 +245,10 @@ Narrowings resolved by #8 (and revised post-#8) that #5 didn't (couldn't) settle
 - **Home dashboard content.** *What* Home's "Recent practice" section shows (last session recap? streak? suggested routine?) is a feature question; parent map #1 says "no new features." Interim: Home renders Chrome mark + hero + a "no recent practice" empty state until a future feature ticket specs the dashboard.
 - **Drill creation feature.** Still deferred from #5. If built, lives exclusively on the Add-a-drill sheet.
 - **Resume affordance on Routines / Stats.** Post-#8 revision removed the persistent-anywhere resume from the tab-bar center. In v1, players resume by tapping the Home tab. Follow-up candidate: mount the amber pill on Routines / Stats when a session is active. Not done in the fold-back because it enlarges scope; flag for the next tab-root pass.
+
+## Rejected alternatives (persistent workout sheet)
+
+See `docs/adr/0004-insession-persistent-workout-sheet.md` for the alternatives considered before landing on the persistent sheet archetype (modal sheet with backdrop, full-screen overlay, dedicated tab, FAB, tab-bar-attached peek).
 
 ## Rejected alternatives
 

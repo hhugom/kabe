@@ -64,21 +64,20 @@ Items on the primary surface that aren't the goal must earn admission via all th
 
 ## Screen-by-screen goals
 
-The nine mode-screens in v1 and their locked goals:
+The mode-screens in v1 and their locked goals:
 
 | Mode-screen | Goal |
 |---|---|
 | Home | Start a Session. |
-| InSession-picker | Pick a Drill. |
-| InSession-reps | Log reps for this Drill. |
-| InSession-accuracy | Log accuracy for this Drill. |
-| InSession-duration | Time this Drill. |
+| InSession (persistent workout sheet, archetype 5) | Log the next Drill. |
 | PickRoutine | Pick a Routine. |
 | Drills | Browse Drills. |
 | RoutineEditor | Compose a Routine. |
 | Stats | Review progress. |
 
 **Updated by #8, revised post-#8:** #8 shifted Home's goal to *See recent practice* on the assumption that Start-a-Session lived on the tab-bar center button. The center button was retired in the post-#8 revision (see `navigation-surface.md`); Home's goal reverts to *Start a Session* (the #5 lock). The "Recent practice" section that ships on Home is dashboard content in the annex tier — an empty-state placeholder in v1, spec'd by a future feature ticket. PickRoutine's goal still broadens from *Pick a Routine* to *Start a Session* (it hosts the "Empty start" affordance alongside the routine list); Routines still has its new *Manage Routines* tab-root goal.
+
+**Updated by ADR-0004:** the four InSession-* mode-screens (picker, reps, accuracy, duration) collapse into a single sheet surface. Goal is *Log the next Drill* — served by the FocusHero (the currently focused planned slot, in its entry mode). UpNextStrip and DoneList inside the sheet are same-goal peripheral (they answer *what's next* and *what's done* within the same "log the next drill" loop). The one-goal-per-mode-screen rule still applies: at any instant, exactly one FocusHero mode (reps/accuracy/duration/empty/finish) is active. See `docs/adr/0004-insession-persistent-workout-sheet.md`.
 
 ## Worked examples
 
@@ -94,29 +93,32 @@ The nine mode-screens in v1 and their locked goals:
 
 The Start-from-Routine alternative path from #5 collapses into the PickRoutine sheet the hero opens (routine rows are the same-goal alternative to Empty start).
 
-### InSession-picker — goal: *Pick a Drill*
+### InSession (persistent workout sheet) — goal: *Log the next Drill*
+
+**Updated by ADR-0004:** the four InSession-* mode-screens (picker, reps, accuracy, duration) are merged into one sheet body. FocusHero surfaces the currently focused slot in its entry mode; UpNextStrip is a horizontal chip strip of remaining unfilled slots; DoneList is a two-section list (planned-filled + ad-hoc) below. The old picker → per-drill navigation is retired.
 
 | Item | Bucket | Destination |
 |---|---|---|
-| Header eyebrow + title | Chrome | Stays |
-| Fused planned-slot list (one row per planned set, empty or filled) | Primary | Stays — is the goal |
-| Ad-hoc entry list (drills logged off-plan) | Primary | **Second section below the fused list**, labeled distinctly |
-| Per-row Delete action (replaces Skip) | Primary | Stays; on filled rows, requires confirm-tap to prevent data loss |
-| "Add a drill" CTA | Primary | Stays — routes to Add-a-drill annex screen |
-| Add-a-drill screen (master drill list picker) | — | **New annex screen** reached from picker CTA |
-| LOGGED SO FAR section (as separate block) | — | **Dissolved** — fused into the planned-slot list as the "filled" state, plus the ad-hoc section |
-| End Session button (current footer bar) | Annex (belongs to a different goal) | **Session menu annex screen** reached from a header affordance present on all InSession modes |
-| Unfilled-slot handling at End Session | — | Session menu triggers a **modal** if any planned slots remain unfilled: "mark complete-to-target" or "skip" (bulk resolve) |
+| In-sheet header row (drag handle · title · three-dot) | Chrome | Stays — owns the Session menu three-dot |
+| FocusHero (drill name + entry-mode input + Save/Cancel) | Primary | Stays — is the goal |
+| UpNextStrip (horizontal chips for remaining unfilled slots + Add-drill chip) | Primary | Stays — same-goal peripheral: *what's next* |
+| DoneList — planned-filled section | Primary | Stays — same-goal peripheral: *what's done*, tap-into-edit |
+| DoneList — ad-hoc section | Primary | **Second labeled section below planned-filled**, distinct heading |
+| Per-slot Delete on the focused slot (focus-delete on FocusHero) | Primary | Stays; on filled slots requires a confirm-tap modal (archetype 4) to prevent data loss |
+| Per-entry Remove inside EditEntrySheet (for DoneList entries) | Primary | Stays; requires a confirm-tap modal to prevent data loss |
+| "Add a drill" chip on UpNextStrip / EmptyHero "Add a drill" CTA | Primary | Stays — opens Add-a-drill sheet |
+| Add-a-drill screen (master drill list picker) | — | **Bottom sheet** reached from either add-drill affordance |
+| End Session action | Annex (belongs to a different goal) | **Session menu bottom sheet** reached from the in-sheet three-dot |
+| Unfilled-slot handling at End Session | — | Session menu End Session triggers a **modal** if any planned slots remain unfilled: "complete-to-target" or "skip all" (bulk resolve) |
+| Mid-timer save-and-switch prompt (tapping a different slot while duration timer runs) | Primary (data-loss guard) | **Modal** (archetype 4), not `Alert.alert` (per navigation-surface.md § Archetype 4) |
 
-**Fusion detail.** Instead of two separate blocks (PLANNED with aggregate progress, LOGGED SO FAR chronological), a single list where each planned *set* is its own row. A routine item with `plannedSets: 3` becomes three rows. Each row is either an empty slot (tap → routes to the drill's entry mode) or a filled slot (shows logged value; tap → view/edit that entry). Ad-hoc entries render in a second section below.
+**Fusion detail.** A single list where each planned *set* is its own row. A routine item with `plannedSets: 3` becomes three rows. Each row is either an empty slot (up-next as a chip; tap → FocusHero switches to that slot's entry mode) or a filled slot (rendered in the planned-filled section of DoneList; tap → EditEntrySheet). Ad-hoc entries render in a second labeled section below planned-filled.
 
-**No-routine sessions.** The fused list starts empty; the primary surface is the "Add a drill" CTA. Empty state IS the CTA.
+**No-routine sessions.** UpNext + DoneList start empty; FocusHero renders the EmptyHero variant whose primary CTA is "Add a drill".
 
-**Per-row Delete semantics.** On empty rows, Delete removes the planned slot from this session (functionally = skip, renamed for consistency). On filled rows, Delete erases the logged entry and reverts the row to empty; requires confirm-tap because it destroys data. The unfilled-slots modal at End Session catches any slot still empty at session end.
+**All-done state.** When every planned slot is filled and no active entry is in progress, FocusHero renders the FinishHero variant with a "Finish session" primary + "Add another drill" ghost.
 
-### InSession entry modes (reps / accuracy / duration)
-
-**Compliant, no changes.** Each entry mode is already single-goal, single-primary. Header is Chrome; the input primitive(s), Save, and Cancel are all Primary (Cancel is a canonical goal-exit). The duration mode's TARGET / REMAINING chips and progress bar are Primary — needed to pace during the goal. No allow-listed pill in entry modes: while the player is *in* an entry mode they are already in the session, so the pill would be tautological.
+**Per-slot Delete semantics.** On empty slots (focus-delete when no entry exists), Delete removes the planned slot from this session (functionally = skip, renamed for consistency) — one tap, silent. On filled slots (focus-delete when the slot has an entry, or edit-remove inside EditEntrySheet), Delete opens a confirm-tap modal because it destroys data. The unfilled-slots modal at End Session catches any slot still empty at session end.
 
 ### PickRoutine — goal: *Pick a Routine*
 

@@ -5,6 +5,7 @@ import { AppButton } from '../components/AppButton';
 import { Icon } from '../components/Icon';
 import { RoutineMenuSheet } from '../components/RoutineMenuSheet';
 import { Screen } from '../components/Screen';
+import { useSessionSheetInset } from '../components/SessionSheet';
 import { getAppDb } from '../db/client';
 import type { RootStackParamList } from '../navigation/types';
 import { colors, radius, spacing, typography } from '../theme';
@@ -29,6 +30,10 @@ export function RoutineEditorScreen({ navigation, route }: Props) {
   const [drills, setDrills] = useState<Drill[]>([]);
   const [loaded, setLoaded] = useState(!isEdit);
   const [menuOpen, setMenuOpen] = useState(false);
+  // Reserve room for the persistent InSession sheet peek (0 when no active
+  // session; PEEK_HEIGHT + safe-area when peeked). Without this, the peek
+  // occludes the Save button on this stack-push route.
+  const sheetInset = useSessionSheetInset();
   // Monotonic key generator for freshly-added draft rows. `prev.length` was not
   // safe: after a remove-then-add, the new row could reuse the survivor's key
   // and collide (React "same key" warning + collapsed rendering).
@@ -192,7 +197,7 @@ export function RoutineEditorScreen({ navigation, route }: Props) {
           </Pressable>
         ))}
       </ScrollView>
-      <View style={styles.footer}>
+      <View style={[styles.footer, { paddingBottom: spacing.lg + sheetInset }]}>
         <AppButton title="Save" onPress={save} size="lg" disabled={!canSave} />
       </View>
       <RoutineMenuSheet

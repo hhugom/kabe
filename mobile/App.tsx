@@ -1,6 +1,6 @@
 import 'react-native-get-random-values';
 
-import { NavigationContainer, useNavigation } from '@react-navigation/native';
+import { NavigationContainer } from '@react-navigation/native';
 import { createBottomTabNavigator } from '@react-navigation/bottom-tabs';
 import {
   createNativeStackNavigator,
@@ -23,12 +23,12 @@ import type { RootStackParamList } from './src/navigation/types';
 import { PickRoutineSheet } from './src/components/PickRoutineSheet';
 import { PillHeader } from './src/components/PillHeader';
 import { SessionActionsProvider } from './src/components/session-actions';
+import { SessionSheetProvider, useSessionSheet } from './src/components/SessionSheet';
 import { TabBar } from './src/components/TabBar';
 import { ArchetypesDemoScreen } from './src/screens/ArchetypesDemoScreen';
 import { RowsDemoScreen } from './src/screens/RowsDemoScreen';
 import { DrillsScreen } from './src/screens/DrillsScreen';
 import { HomeScreen } from './src/screens/HomeScreen';
-import { InSessionScreen } from './src/screens/InSessionScreen';
 import { RoutineEditorScreen } from './src/screens/RoutineEditorScreen';
 import { RoutinesScreen } from './src/screens/RoutinesScreen';
 import { StatsScreen } from './src/screens/StatsScreen';
@@ -45,10 +45,10 @@ type TabsProps = {
 };
 
 function Tabs({ sessionActive, refreshSessionActive }: TabsProps) {
-  const rootNav = useNavigation<NativeStackNavigationProp<RootStackParamList>>();
+  const { openFull } = useSessionSheet();
   const [pickerOpen, setPickerOpen] = useState(false);
   const onStartPress = () => setPickerOpen(true);
-  const onResumePress = () => rootNav.navigate('InSession');
+  const onResumePress = () => openFull();
   return (
     <SessionActionsProvider value={{ sessionActive, onStartPress, onResumePress }}>
       <Tab.Navigator
@@ -65,7 +65,7 @@ function Tabs({ sessionActive, refreshSessionActive }: TabsProps) {
         onStarted={() => {
           setPickerOpen(false);
           refreshSessionActive();
-          rootNav.navigate('InSession');
+          openFull();
         }}
       />
     </SessionActionsProvider>
@@ -78,12 +78,27 @@ export default function App() {
   const [seeded, setSeeded] = useState(false);
   const [seedError, setSeedError] = useState<Error | null>(null);
   const [sessionActive, setSessionActive] = useState(false);
+  // Sheet peek needs to sit above the tab bar on tab-root screens, and just
+  // above the bottom safe-area on pushed screens. useNavigationState can't be
+  // called from SessionSheetProvider (it's outside a Navigator), so we track
+  // the top-level route here via NavigationContainer.onStateChange.
+  const [tabBarVisible, setTabBarVisible] = useState(true);
 
   const refreshSessionActive = useCallback(() => {
     getActiveSession(db)
       .then((result) => setSessionActive(!!result))
       .catch(() => setSessionActive(false));
   }, [db]);
+
+  const handleNavStateChange = useCallback(
+    (state: Parameters<NonNullable<React.ComponentProps<typeof NavigationContainer>['onStateChange']>>[0]) => {
+      refreshSessionActive();
+      if (!state) return;
+      const top = state.routes[state.index];
+      setTabBarVisible(top?.name === 'Tabs');
+    },
+    [refreshSessionActive]
+  );
 
   useEffect(() => {
     if (!seeded) return;
@@ -99,24 +114,18 @@ export default function App() {
   }, [migrated, db]);
 
   const renderPillHeader = useCallback(
-    ({ options, route, navigation, back }: NativeStackHeaderProps) => {
+    ({ options, navigation, back }: NativeStackHeaderProps) => {
       const nav = navigation as NativeStackNavigationProp<RootStackParamList>;
-      // Pill is suppressed on InSession itself — see navigation-surface.md § Active-session pill.
-      const showPill = sessionActive && route.name !== 'InSession';
-      // Screens publish a three-dot handler via navigation.setOptions({ onMenuPress }).
-      // React Navigation types `options` as `any`, so we cast to read it.
       const onMenuPress = (options as any).onMenuPress as (() => void) | undefined;
       return (
         <PillHeader
           title={typeof options.title === 'string' ? options.title : ''}
           onBack={back ? () => nav.goBack() : undefined}
-          sessionActive={showPill}
-          onResumePress={() => nav.navigate('InSession')}
           onMenuPress={onMenuPress}
         />
       );
     },
-    [sessionActive]
+    []
   );
 
   if (migrateError) {
@@ -146,52 +155,53 @@ export default function App() {
   return (
     <TamaguiProvider config={tamaguiConfig} defaultTheme="kabe_dark">
     <SafeAreaProvider>
-      <NavigationContainer onStateChange={refreshSessionActive}>
-        <RootStack.Navigator
-          screenOptions={{
-            headerStyle: { backgroundColor: colors.bg },
-            headerShadowVisible: false,
-            headerTitleStyle: { fontWeight: '700' },
-            contentStyle: { backgroundColor: colors.bg },
-          }}
+      <NavigationContainer onStateChange={handleNavStateChange}>
+        <SessionSheetProvider
+          sessionActive={sessionActive}
+          onSessionEnded={refreshSessionActive}
+          tabBarVisible={tabBarVisible}
         >
-          <RootStack.Screen name="Tabs" options={{ headerShown: false }}>
-            {() => (
-              <Tabs
-                sessionActive={sessionActive}
-                refreshSessionActive={refreshSessionActive}
-              />
-            )}
-          </RootStack.Screen>
-          <RootStack.Screen
-            name="RoutineEditor"
-            component={RoutineEditorScreen}
-            options={({ route }) => ({
-              title: route.params?.routineId ? 'Edit routine' : 'New routine',
-              header: renderPillHeader,
-            })}
-          />
-          <RootStack.Screen
-            name="Drills"
-            component={DrillsScreen}
-            options={{ title: 'Drills', header: renderPillHeader }}
-          />
-          <RootStack.Screen
-            name="InSession"
-            component={InSessionScreen}
-            options={{ title: 'Session', header: renderPillHeader }}
-          />
-          <RootStack.Screen
-            name="ArchetypesDemo"
-            component={ArchetypesDemoScreen}
-            options={{ title: 'Screen archetypes' }}
-          />
-          <RootStack.Screen
-            name="RowsDemo"
-            component={RowsDemoScreen}
-            options={{ title: 'Row primitive' }}
-          />
-        </RootStack.Navigator>
+          <RootStack.Navigator
+            screenOptions={{
+              headerStyle: { backgroundColor: colors.bg },
+              headerShadowVisible: false,
+              headerTitleStyle: { fontWeight: '700' },
+              contentStyle: { backgroundColor: colors.bg },
+            }}
+          >
+            <RootStack.Screen name="Tabs" options={{ headerShown: false }}>
+              {() => (
+                <Tabs
+                  sessionActive={sessionActive}
+                  refreshSessionActive={refreshSessionActive}
+                />
+              )}
+            </RootStack.Screen>
+            <RootStack.Screen
+              name="RoutineEditor"
+              component={RoutineEditorScreen}
+              options={({ route }) => ({
+                title: route.params?.routineId ? 'Edit routine' : 'New routine',
+                header: renderPillHeader,
+              })}
+            />
+            <RootStack.Screen
+              name="Drills"
+              component={DrillsScreen}
+              options={{ title: 'Drills', header: renderPillHeader }}
+            />
+            <RootStack.Screen
+              name="ArchetypesDemo"
+              component={ArchetypesDemoScreen}
+              options={{ title: 'Screen archetypes' }}
+            />
+            <RootStack.Screen
+              name="RowsDemo"
+              component={RowsDemoScreen}
+              options={{ title: 'Row primitive' }}
+            />
+          </RootStack.Navigator>
+        </SessionSheetProvider>
         <StatusBar style="auto" />
       </NavigationContainer>
     </SafeAreaProvider>

@@ -1,24 +1,21 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
-import { ActiveSessionPill } from './ActiveSessionPill';
 import { Icon } from './Icon';
 import { colors, spacing, typography } from '../theme';
 
 type Props = {
   title: string;
   onBack?: () => void;
-  sessionActive: boolean;
-  onResumePress: () => void;
   onMenuPress?: () => void;
 };
 
-// Custom stack-push header: [status bar → pill (if session) → header row → content],
-// per docs/conventions/navigation-surface.md § Active-session pill.
-// Wired via RootStack.Screen `options.header` for RoutineEditor.
-export function PillHeader({ title, onBack, sessionActive, onResumePress, onMenuPress }: Props) {
+// Custom stack-push header: [status bar → header row → content].
+// Wired via RootStack.Screen `options.header` for RoutineEditor / Drills.
+// The active-session amber pill is retired — the root SessionSheet peek is
+// always visible when a session is active, making the header pill redundant.
+export function PillHeader({ title, onBack, onMenuPress }: Props) {
   return (
     <SafeAreaView edges={['top', 'left', 'right']} style={styles.safe}>
-      {sessionActive ? <ActiveSessionPill onPress={onResumePress} /> : null}
       <View testID="pill-header-row" style={styles.row}>
         {onBack ? (
           <Pressable

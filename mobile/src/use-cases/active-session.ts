@@ -74,7 +74,7 @@ export async function hydrate(db: Db): Promise<ActiveSessionState | null> {
 }
 
 export function pickDrill(state: ActiveSessionState, drillId: string): ActiveSessionState {
-  const drill = state.drills.find((d) => d.id === drillId);
+  const drill = drillFor(state, drillId);
   if (!drill) return state;
   return { ...state, pickedDrill: drill, draft: draftForMetric(drill), editingEntryId: null };
 }
@@ -82,7 +82,7 @@ export function pickDrill(state: ActiveSessionState, drillId: string): ActiveSes
 export function pickEntry(state: ActiveSessionState, entryId: string): ActiveSessionState {
   const entry = state.entries.find((e) => e.id === entryId);
   if (!entry) return state;
-  const drill = state.drills.find((d) => d.id === entry.drillId);
+  const drill = drillFor(state, entry.drillId);
   if (!drill) return state;
   return {
     ...state,
@@ -179,12 +179,26 @@ export async function endActiveSession(
   await endSession(db, state.session.id, { now: opts.now });
 }
 
+// A stable identity for a planned slot, safe to compare across renders and
+// use as a React key. Composite of routine-item id + slot index within that
+// item. Wrapped as a branded type so callers don't accidentally mix it with
+// arbitrary strings.
+export type SlotId = string & { readonly __brand: 'SlotId' };
+
 export type PlannedSlot = {
   itemId: string;
   drillId: string;
   slotIndex: number;
   entry: DrillEntry | null;
 };
+
+export function slotIdOf(slot: PlannedSlot): SlotId {
+  return `${slot.itemId}-${slot.slotIndex}` as SlotId;
+}
+
+export function drillFor(state: ActiveSessionState, drillId: string): Drill | null {
+  return state.drills.find((d) => d.id === drillId) ?? null;
+}
 
 function groupEntriesByDrill(entries: DrillEntry[]): Map<string, DrillEntry[]> {
   const out = new Map<string, DrillEntry[]>();
