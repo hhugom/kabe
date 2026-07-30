@@ -45,21 +45,11 @@ import {
 } from 'react-native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { XStack } from 'tamagui';
-import { getAppDb } from '../db/client';
 import { formatMmSs } from '../lib/format';
 import { InSessionScreen } from '../screens/InSessionScreen';
+import { TAB_BAR_HEIGHT } from '../layout/tab-bar';
 import { colors, radius, spacing } from '../theme';
-import {
-  ActiveSessionState,
-  drillFor,
-  hydrate,
-  plannedSlots,
-} from '../use-cases/active-session';
 
-// TabBar minHeight (56) + paddingTop (8) + hairline. Kept in sync with
-// TabBar.tsx — the tab bar itself pads for the safe area, so we add
-// insets.bottom separately at the render site.
-const TAB_BAR_HEIGHT = 65;
 // Peek header height — grabber + single-line bar (title + timer).
 const PEEK_HEIGHT = 56;
 
@@ -74,10 +64,30 @@ const Ctx = createContext<SessionSheetController | null>(null);
 // footer) don't have to consume the controller.
 const InsetCtx = createContext<number>(0);
 
+// The peek label + timer origin are published from InSessionScreen (which
+// owns ActiveSessionState). Without a live publisher the peek would go stale
+// on every focus/save/delete — see PR #41 review. Default is a no-op so
+// InSessionScreen still renders in isolation (its tests don't wrap in the
+// provider).
+type PeekMeta = {
+  label: string | null;
+  startedAtMs: number | null;
+};
+type PeekPublisher = (meta: PeekMeta) => void;
+const PeekMetaCtx = createContext<PeekMeta>({ label: null, startedAtMs: null });
+const PeekPublisherCtx = createContext<PeekPublisher>(() => {});
+
 export function useSessionSheet(): SessionSheetController {
   const v = useContext(Ctx);
   if (!v) throw new Error('useSessionSheet: SessionSheetProvider missing');
   return v;
+}
+
+// Publish peek metadata (current-drill label + session startedAt) from the
+// component that owns ActiveSessionState (InSessionScreen). A no-op by default
+// so callers outside a SessionSheetProvider (tests) don't have to wire it up.
+export function useSessionPeekPublisher(): PeekPublisher {
+  return useContext(PeekPublisherCtx);
 }
 
 // Pixels of vertical space the peek occupies at rest. 0 when no active
@@ -105,6 +115,19 @@ export function SessionSheetProvider({
 }: Props) {
   const insets = useSafeAreaInsets();
   const screenH = Dimensions.get('window').height;
+  const [peekMeta, setPeekMeta] = useState<PeekMeta>({
+    label: null,
+    startedAtMs: null,
+  });
+  const publishPeekMeta = useCallback<PeekPublisher>((next) => {
+    setPeekMeta((prev) =>
+      prev.label === next.label && prev.startedAtMs === next.startedAtMs ? prev : next
+    );
+  }, []);
+  // Reset when the session ends so the next session's peek starts clean.
+  useEffect(() => {
+    if (!sessionActive) setPeekMeta({ label: null, startedAtMs: null });
+  }, [sessionActive]);
 
   const sheetBottom = insets.bottom + (tabBarVisible ? TAB_BAR_HEIGHT : 0);
   const sheetHeight = screenH - sheetBottom - insets.top;
@@ -209,43 +232,46 @@ export function SessionSheetProvider({
   return (
     <Ctx.Provider value={controller}>
       <InsetCtx.Provider value={inset}>
-        {children}
-        {sessionActive ? (
-          // Clip region spans from screen top down to the top of the tab bar
-          // (or bottom safe-area on push routes). overflow: 'hidden' masks the
-          // sheet body when peeked so it never bleeds over the nav.
-          // pointerEvents: 'box-none' lets taps pass through to the underlying
-          // content in the empty top area.
-          <View
-            pointerEvents="box-none"
-            style={[styles.clipRegion, { bottom: sheetBottom }]}
-          >
-            <Animated.View
-              style={[
-                styles.sheet,
-                {
-                  height: sheetHeight,
-                  transform: [{ translateY }],
-                },
-              ]}
-            >
+        <PeekPublisherCtx.Provider value={publishPeekMeta}>
+          <PeekMetaCtx.Provider value={peekMeta}>
+            {children}
+            {sessionActive ? (
+              // Clip region spans from screen top down to the top of the tab bar
+              // (or bottom safe-area on push routes). overflow: 'hidden' masks the
+              // sheet body when peeked so it never bleeds over the nav.
+              // pointerEvents: 'box-none' lets taps pass through to the underlying
+              // content in the empty top area.
               <View
-                style={[styles.peekHeader, { height: PEEK_HEIGHT }]}
-                {...panResponder.panHandlers}
+                pointerEvents="box-none"
+                style={[styles.clipRegion, { bottom: sheetBottom }]}
               >
-                <PeekContent
-                  sessionActive={sessionActive}
-                  expanded={expanded}
-                  onExpandPress={openFull}
-                  onCollapsePress={collapse}
-                />
+                <Animated.View
+                  style={[
+                    styles.sheet,
+                    {
+                      height: sheetHeight,
+                      transform: [{ translateY }],
+                    },
+                  ]}
+                >
+                  <View
+                    style={[styles.peekHeader, { height: PEEK_HEIGHT }]}
+                    {...panResponder.panHandlers}
+                  >
+                    <PeekContent
+                      expanded={expanded}
+                      onExpandPress={openFull}
+                      onCollapsePress={collapse}
+                    />
+                  </View>
+                  <View style={styles.fullBody}>
+                    <InSessionScreen onClose={controller.close} />
+                  </View>
+                </Animated.View>
               </View>
-              <View style={styles.fullBody}>
-                <InSessionScreen onClose={controller.close} />
-              </View>
-            </Animated.View>
-          </View>
-        ) : null}
+            ) : null}
+          </PeekMetaCtx.Provider>
+        </PeekPublisherCtx.Provider>
       </InsetCtx.Provider>
     </Ctx.Provider>
   );
@@ -254,46 +280,23 @@ export function SessionSheetProvider({
 // -------------------------------------------------------------- peek head --
 
 function PeekContent({
-  sessionActive,
   expanded,
   onExpandPress,
   onCollapsePress,
 }: {
-  sessionActive: boolean;
   expanded: boolean;
   onExpandPress: () => void;
   onCollapsePress: () => void;
 }) {
-  const [state, setState] = useState<ActiveSessionState | null>(null);
+  const { label, startedAtMs } = useContext(PeekMetaCtx);
   const [elapsedSec, setElapsedSec] = useState(0);
-  const startedAtRef = useRef<number | null>(null);
 
-  // Re-hydrate every time sessionActive flips true (or on mount if already
-  // true). Without the `sessionActive` dep the peek would stay on `Loading…`
-  // forever when a session starts after the peek first mounted.
   useEffect(() => {
-    if (!sessionActive) {
-      setState(null);
-      startedAtRef.current = null;
+    if (startedAtMs == null) {
       setElapsedSec(0);
       return;
     }
-    let cancelled = false;
-    (async () => {
-      const next = await hydrate(getAppDb());
-      if (cancelled) return;
-      setState(next);
-      startedAtRef.current = next ? Date.parse(next.session.startedAt) : null;
-    })();
-    return () => {
-      cancelled = true;
-    };
-  }, [sessionActive]);
-
-  useEffect(() => {
-    if (startedAtRef.current == null) return;
-    const compute = () =>
-      Math.max(0, Math.floor((Date.now() - (startedAtRef.current ?? 0)) / 1000));
+    const compute = () => Math.max(0, Math.floor((Date.now() - startedAtMs) / 1000));
     setElapsedSec(compute());
     if (process.env.NODE_ENV === 'test') return;
     const id = setInterval(() => setElapsedSec(compute()), 1000);
@@ -304,9 +307,7 @@ function PeekContent({
       clearInterval(id);
       sub?.remove();
     };
-  }, [state]);
-
-  const label = pickCurrentDrillLabel(state);
+  }, [startedAtMs]);
 
   return (
     <Pressable
@@ -317,8 +318,8 @@ function PeekContent({
       <View style={styles.grabber} />
       <XStack alignItems="center" gap={spacing.sm} paddingHorizontal={spacing.md}>
         <View style={styles.dot} />
-        <Text style={styles.peekTitle} numberOfLines={1}>
-          {label}
+        <Text style={styles.peekTitle} numberOfLines={1} testID="session-peek-label">
+          {label ?? 'Loading…'}
         </Text>
         <Text style={styles.peekTime} testID="session-peek-time">
           {formatMmSs(elapsedSec)}
@@ -326,17 +327,6 @@ function PeekContent({
       </XStack>
     </Pressable>
   );
-}
-
-function pickCurrentDrillLabel(state: ActiveSessionState | null): string {
-  if (!state) return 'Loading…';
-  if (state.pickedDrill) return state.pickedDrill.name;
-  const slots = plannedSlots(state);
-  const nextSlot = slots.find((s) => !s.entry);
-  if (nextSlot) {
-    return drillFor(state, nextSlot.drillId)?.name ?? 'Session';
-  }
-  return 'Session';
 }
 
 // -------------------------------------------------------------- styles --

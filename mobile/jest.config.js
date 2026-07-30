@@ -24,8 +24,9 @@ module.exports = {
         '<rootDir>/src/screens/**/*.test.tsx',
         '<rootDir>/src/components/**/*.test.tsx',
       ],
+      setupFilesAfterEnv: ['<rootDir>/src/test-setup.ui.ts'],
       transformIgnorePatterns: [
-        'node_modules/(?!((jest-)?react-native|@react-native(-community)?|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@unimodules/.*|unimodules|sentry-expo|native-base|react-native-svg|tamagui|@tamagui/.*))',
+        'node_modules/(?!((jest-)?react-native|@react-native(-community)?|expo(nent)?|@expo(nent)?/.*|@expo-google-fonts/.*|react-navigation|@react-navigation/.*|@unimodules/.*|unimodules|sentry-expo|native-base|react-native-svg|tamagui|@tamagui/.*|uuid))',
       ],
     },
   ],

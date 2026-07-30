@@ -1,0 +1,3 @@
+# Ephemeral agent worktrees — never belongs in tree; SessionSheet review #41
+# caught 7 accidentally committed gitlinks. Belt-and-braces: ignore the dir.
+.claude/worktrees/
