@@ -90,14 +90,16 @@ export default function App() {
       .catch(() => setSessionActive(false));
   }, [db]);
 
+  // Session-active only flips at two moments — session start (PickRoutineSheet)
+  // and session end (SessionSheet's close). Both call refreshSessionActive
+  // themselves; we don't need a DB round-trip on every nav transition here.
   const handleNavStateChange = useCallback(
     (state: Parameters<NonNullable<React.ComponentProps<typeof NavigationContainer>['onStateChange']>>[0]) => {
-      refreshSessionActive();
       if (!state) return;
       const top = state.routes[state.index];
       setTabBarVisible(top?.name === 'Tabs');
     },
-    [refreshSessionActive]
+    []
   );
 
   useEffect(() => {

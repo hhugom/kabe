@@ -17,6 +17,7 @@ import { Icon } from '../components/Icon';
 import { ModalLayout } from '../components/ModalLayout';
 import { Screen } from '../components/Screen';
 import { SessionMenuSheet } from '../components/SessionMenuSheet';
+import { useSessionPeekPublisher } from '../components/SessionSheet';
 import { getAppDb } from '../db/client';
 import { colors, spacing } from '../theme';
 import {
@@ -79,6 +80,7 @@ type PendingDelete =
 
 export function InSessionScreen({ clock = defaultClock, onClose }: Props) {
   const close = () => onClose?.();
+  const publishPeekMeta = useSessionPeekPublisher();
   const [state, setState] = useState<ActiveSessionState | null>(null);
   const [loaded, setLoaded] = useState(false);
   const [timerStartedAt, setTimerStartedAt] = useState<Date | null>(null);
@@ -110,6 +112,21 @@ export function InSessionScreen({ clock = defaultClock, onClose }: Props) {
       deactivateKeepAwake();
     };
   }, [timerStartedAt]);
+
+  // Feed the persistent-sheet peek. The peek can't derive this itself — its
+  // last hydrated snapshot goes stale the moment focus/save/delete run here.
+  // Publish label + startedAt whenever our state changes so the header line
+  // stays truthful across every mutation.
+  useEffect(() => {
+    if (!state) {
+      publishPeekMeta({ label: null, startedAtMs: null });
+      return;
+    }
+    publishPeekMeta({
+      label: currentDrillLabel(state),
+      startedAtMs: Date.parse(state.session.startedAt),
+    });
+  }, [state, publishPeekMeta]);
 
   // Auto-focus the first unfilled slot inline: cheaper and safer than a
   // useEffect that re-fires on every render. Callers thread the fresh state
@@ -503,6 +520,15 @@ function deriveSlots(state: ActiveSessionState): Derived {
   const allDone = unfilledPlanned.length === 0 && anyLogged;
   const isEmpty = slots.length === 0 && adhoc.length === 0 && state.pickedDrill == null;
   return { slots, unfilledPlanned, filledPlanned, adhoc, allDone, isEmpty };
+}
+
+// Peek label heuristic: prefer the drill in focus; else the drill for the
+// next unfilled planned slot; else fall back to the generic 'Session'.
+function currentDrillLabel(state: ActiveSessionState): string {
+  if (state.pickedDrill) return state.pickedDrill.name;
+  const nextSlot = plannedSlots(state).find((s) => !s.entry);
+  if (nextSlot) return drillFor(state, nextSlot.drillId)?.name ?? 'Session';
+  return 'Session';
 }
 
 const styles = StyleSheet.create({

@@ -1057,15 +1057,20 @@ describe('InSessionScreen — mid-timer switch confirm modal (replaces Alert.ale
     const { findByTestId, findByLabelText } = await renderScreen({ clock });
     await findByTestId('focus-hero');
 
-    fireEvent.press(await findByLabelText('Start'));
+    const startBtn = await findByLabelText('Start');
+    await act(async () => {
+      fireEvent.press(startBtn);
+    });
     ticks = 30_000;
 
+    const upNext = await findByTestId('up-next-ri-1-1');
     await act(async () => {
-      fireEvent.press(await findByTestId('up-next-ri-1-1'));
+      fireEvent.press(upNext);
     });
 
+    const saveBtn = await findByTestId('switch-timer-save');
     await act(async () => {
-      fireEvent.press(await findByTestId('switch-timer-save'));
+      fireEvent.press(saveBtn);
       await new Promise((res) => setImmediate(res));
     });
 
@@ -1090,22 +1095,20 @@ describe('InSessionScreen — mid-timer switch confirm modal (replaces Alert.ale
     const { findByTestId, findByLabelText, queryByTestId } = await renderScreen({ clock });
     await findByTestId('focus-hero');
 
+    const startBtn = await findByLabelText('Start');
     await act(async () => {
-      fireEvent.press(await findByLabelText('Start'));
+      fireEvent.press(startBtn);
     });
     ticks = 42_000;
 
+    const upNext = await findByTestId('up-next-ri-1-1');
     await act(async () => {
-      fireEvent.press(await findByTestId('up-next-ri-1-1'));
+      fireEvent.press(upNext);
     });
 
+    const cancelBtn = await findByTestId('switch-timer-cancel');
     await act(async () => {
-      fireEvent.press(await findByTestId('switch-timer-cancel'));
-    });
-
-    // Flush pending state settlements before the test ends.
-    await act(async () => {
-      await new Promise((res) => setImmediate(res));
+      fireEvent.press(cancelBtn);
     });
 
     expect(mockLogEntry).not.toHaveBeenCalled();
