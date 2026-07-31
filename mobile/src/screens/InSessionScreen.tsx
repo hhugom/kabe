@@ -1,23 +1,19 @@
 // Persistent workout sheet body (archetype 5 — see docs/adr/0004 and
 // navigation-surface.md § Archetype 5). Orchestrates hydration, entry state,
-// the in-sheet three-dot Session menu, and three archetype-4 modals:
-// unfilled-slots-at-end, mid-timer save-and-switch, delete-filled confirm.
+// and the archetype-4 modals: mid-timer save-and-switch and delete-filled
+// confirm. The session ends from the FinishHero once every planned slot is
+// filled — there is no in-sheet menu.
 //
 // Presentation lives in ./insession/*. This file is the state machine and
-// the wiring — no visual chrome except the in-sheet header row with the
-// three-dot (which is the InSession-only equivalent of a stack-push header).
+// the wiring — no visual chrome of its own.
 
 import { activateKeepAwakeAsync, deactivateKeepAwake } from 'expo-keep-awake';
 import { useCallback, useEffect, useState } from 'react';
-import { AppState, Pressable, ScrollView, StyleSheet } from 'react-native';
-import { XStack, YStack } from 'tamagui';
+import { AppState, ScrollView } from 'react-native';
+import { YStack } from 'tamagui';
 import { AddADrillSheet } from '../components/AddADrillSheet';
-import { AppButton } from '../components/AppButton';
-import { Icon } from '../components/Icon';
-import { ModalLayout } from '../components/ModalLayout';
 import { Screen } from '../components/Screen';
-import { SessionMenuSheet } from '../components/SessionMenuSheet';
-import { useSessionPeekPublisher } from '../components/SessionSheet';
+import { useSessionPeekPublisher } from '../components/session-peek';
 import { getAppDb } from '../db/client';
 import { colors, spacing } from '../theme';
 import {
@@ -39,11 +35,6 @@ import {
   type PlannedSlot,
   type SlotId,
 } from '../use-cases/active-session';
-import {
-  completeToTarget,
-  skipAllUnfilled,
-  unfilledSlots,
-} from '../use-cases/bulk-resolve-unfilled-slots';
 import { Drill } from '../use-cases/drills';
 import type { DrillEntry } from '../use-cases/sessions';
 import { deleteEntry, updateEntry } from '../use-cases/sessions';
@@ -85,8 +76,6 @@ export function InSessionScreen({ clock = defaultClock, onClose }: Props) {
   const [loaded, setLoaded] = useState(false);
   const [timerStartedAt, setTimerStartedAt] = useState<Date | null>(null);
   const [addDrillOpen, setAddDrillOpen] = useState(false);
-  const [menuOpen, setMenuOpen] = useState(false);
-  const [unfilledModalOpen, setUnfilledModalOpen] = useState(false);
   const [editEntryId, setEditEntryId] = useState<string | null>(null);
   const [switchPrompt, setSwitchPrompt] = useState<SwitchPrompt | null>(null);
   const [pendingDelete, setPendingDelete] = useState<PendingDelete | null>(null);
@@ -207,11 +196,6 @@ export function InSessionScreen({ clock = defaultClock, onClose }: Props) {
     setFocusedSlotId(null);
   }
 
-  function onCancelEntry() {
-    setTimerStartedAt(null);
-    setState((s) => (s ? autoFocusFirstUnfilled(cancelEntry(s)) : s));
-  }
-
   function onStartTimer() {
     setTimerStartedAt(clock());
     activateKeepAwakeAsync().catch(() => {});
@@ -314,33 +298,6 @@ export function InSessionScreen({ clock = defaultClock, onClose }: Props) {
     close();
   }
 
-  function requestEnd() {
-    if (!state) return;
-    if (unfilledSlots(state).length > 0) {
-      setUnfilledModalOpen(true);
-    } else {
-      onEnd();
-    }
-  }
-
-  async function onCompleteToTarget() {
-    if (!state) return;
-    const next = await completeToTarget(state, getAppDb(), { now: clock });
-    setState(next);
-    setUnfilledModalOpen(false);
-    await endActiveSession(next, getAppDb(), { now: clock });
-    close();
-  }
-
-  async function onSkipAllUnfilled() {
-    if (!state) return;
-    const next = skipAllUnfilled(state);
-    setState(next);
-    setUnfilledModalOpen(false);
-    await endActiveSession(next, getAppDb(), { now: clock });
-    close();
-  }
-
   if (!loaded || !state || !derived) return <Screen />;
 
   const { pickedDrill, draft } = state;
@@ -359,28 +316,9 @@ export function InSessionScreen({ clock = defaultClock, onClose }: Props) {
 
   return (
     <Screen padded={false} edges={['left', 'right']}>
-      {/* In-sheet header row (the InSession-only equivalent of a stack-push
-          header, per navigation-surface.md § Header-icon affordance
-          Post-ADR-0004). Just a three-dot on the right — the peek header
-          above owns drag handle + title + timer. */}
-      <XStack
-        alignItems="center"
-        justifyContent="flex-end"
-        paddingHorizontal={spacing.md}
-        paddingTop={spacing.sm}
-        paddingBottom={spacing.sm}
-      >
-        <Pressable
-          testID="insession-menu"
-          accessibilityRole="button"
-          accessibilityLabel="Session menu"
-          onPress={() => setMenuOpen(true)}
-          style={styles.menuBtn}
-        >
-          <Icon name="more-vert" size={24} color={colors.textPrimary} />
-        </Pressable>
-      </XStack>
-
+      {/* The peek header above owns drag handle + title + timer. The session
+          ends from the FinishHero once every planned slot is filled — there is
+          no in-sheet menu. */}
       <ScrollView
         style={{ flex: 1 }}
         contentContainerStyle={{
@@ -395,7 +333,7 @@ export function InSessionScreen({ clock = defaultClock, onClose }: Props) {
           ) : allDone ? (
             <FinishHero
               totalSlots={doneCount}
-              onFinish={requestEnd}
+              onFinish={onEnd}
               onAddDrill={() => setAddDrillOpen(true)}
             />
           ) : pickedDrill && draft ? (
@@ -416,10 +354,6 @@ export function InSessionScreen({ clock = defaultClock, onClose }: Props) {
                 onSaveEntry,
                 onStartTimer,
                 onStopTimer,
-                onCancel: onCancelEntry,
-                onDeleteSlot: focusedSlot
-                  ? () => onRequestDeleteFocusedSlot(focusedSlot)
-                  : undefined,
               }}
             />
           ) : null}
@@ -460,29 +394,6 @@ export function InSessionScreen({ clock = defaultClock, onClose }: Props) {
         onRemoveRequest={onRequestDeleteEntry}
       />
 
-      <SessionMenuSheet
-        open={menuOpen}
-        onOpenChange={setMenuOpen}
-        onEndSession={() => {
-          setMenuOpen(false);
-          requestEnd();
-        }}
-      />
-
-      <ModalLayout
-        open={unfilledModalOpen}
-        onCancel={() => setUnfilledModalOpen(false)}
-        title="Unfilled planned slots"
-      >
-        <AppButton title="Complete to target" onPress={onCompleteToTarget} size="lg" />
-        <AppButton
-          title="Skip all"
-          onPress={onSkipAllUnfilled}
-          size="lg"
-          variant="dangerSolid"
-        />
-      </ModalLayout>
-
       <SwitchTimerConfirm
         open={switchPrompt != null}
         drillName={switchPrompt?.drill.name ?? ''}
@@ -517,7 +428,10 @@ function deriveSlots(state: ActiveSessionState): Derived {
   const filledPlanned = slots.filter((s) => s.entry != null);
   const adhoc = adHocEntries(state);
   const anyLogged = filledPlanned.length + adhoc.length > 0;
-  const allDone = unfilledPlanned.length === 0 && anyLogged;
+  // A picked drill with no matching unfilled slot is an in-progress ad-hoc log
+  // (e.g. "Add another drill" from the finish hero). Keep allDone false so the
+  // FocusHero shows for it instead of the finish screen staying up.
+  const allDone = unfilledPlanned.length === 0 && anyLogged && state.pickedDrill == null;
   const isEmpty = slots.length === 0 && adhoc.length === 0 && state.pickedDrill == null;
   return { slots, unfilledPlanned, filledPlanned, adhoc, allDone, isEmpty };
 }
@@ -530,13 +444,4 @@ function currentDrillLabel(state: ActiveSessionState): string {
   if (nextSlot) return drillFor(state, nextSlot.drillId)?.name ?? 'Session';
   return 'Session';
 }
-
-const styles = StyleSheet.create({
-  menuBtn: {
-    minWidth: 48,
-    minHeight: 48,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-});
 

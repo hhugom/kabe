@@ -47,11 +47,15 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { XStack } from 'tamagui';
 import { formatMmSs } from '../lib/format';
 import { InSessionScreen } from '../screens/InSessionScreen';
-import { TAB_BAR_HEIGHT } from '../layout/tab-bar';
 import { colors, radius, spacing } from '../theme';
-
-// Peek header height — grabber + single-line bar (title + timer).
-const PEEK_HEIGHT = 56;
+import { computeSheetLayout, PEEK_HEIGHT } from './session-sheet-geometry';
+import {
+  PeekMetaCtx,
+  PeekPublisherCtx,
+  useSessionPeekMeta,
+  type PeekMeta,
+  type PeekPublisher,
+} from './session-peek';
 
 type SessionSheetController = {
   openFull: () => void;
@@ -64,30 +68,10 @@ const Ctx = createContext<SessionSheetController | null>(null);
 // footer) don't have to consume the controller.
 const InsetCtx = createContext<number>(0);
 
-// The peek label + timer origin are published from InSessionScreen (which
-// owns ActiveSessionState). Without a live publisher the peek would go stale
-// on every focus/save/delete — see PR #41 review. Default is a no-op so
-// InSessionScreen still renders in isolation (its tests don't wrap in the
-// provider).
-type PeekMeta = {
-  label: string | null;
-  startedAtMs: number | null;
-};
-type PeekPublisher = (meta: PeekMeta) => void;
-const PeekMetaCtx = createContext<PeekMeta>({ label: null, startedAtMs: null });
-const PeekPublisherCtx = createContext<PeekPublisher>(() => {});
-
 export function useSessionSheet(): SessionSheetController {
   const v = useContext(Ctx);
   if (!v) throw new Error('useSessionSheet: SessionSheetProvider missing');
   return v;
-}
-
-// Publish peek metadata (current-drill label + session startedAt) from the
-// component that owns ActiveSessionState (InSessionScreen). A no-op by default
-// so callers outside a SessionSheetProvider (tests) don't have to wire it up.
-export function useSessionPeekPublisher(): PeekPublisher {
-  return useContext(PeekPublisherCtx);
 }
 
 // Pixels of vertical space the peek occupies at rest. 0 when no active
@@ -129,12 +113,16 @@ export function SessionSheetProvider({
     if (!sessionActive) setPeekMeta({ label: null, startedAtMs: null });
   }, [sessionActive]);
 
-  const sheetBottom = insets.bottom + (tabBarVisible ? TAB_BAR_HEIGHT : 0);
-  const sheetHeight = screenH - sheetBottom - insets.top;
-  const peekTranslate = sheetHeight - PEEK_HEIGHT;
+  const [expanded, setExpanded] = useState(false);
+  const { sheetTop, sheetHeight, peekTranslate, clipBottom } = computeSheetLayout({
+    screenHeight: screenH,
+    insetTop: insets.top,
+    insetBottom: insets.bottom,
+    tabBarVisible,
+    expanded,
+  });
 
   const translateY = useRef(new Animated.Value(peekTranslate)).current;
-  const [expanded, setExpanded] = useState(false);
   // Ref mirror so pan handlers (which capture at creation time) always see
   // the latest value without recreating the responder.
   const expandedRef = useRef(false);
@@ -236,19 +224,28 @@ export function SessionSheetProvider({
           <PeekMetaCtx.Provider value={peekMeta}>
             {children}
             {sessionActive ? (
-              // Clip region spans from screen top down to the top of the tab bar
-              // (or bottom safe-area on push routes). overflow: 'hidden' masks the
-              // sheet body when peeked so it never bleeds over the nav.
+              // Clip region masks the sheet body. At PEEK its bottom sits at the
+              // top of the tab bar (or bottom safe-area on push routes) so the
+              // tab bar shows through; at FULL it drops to the safe-area to
+              // reveal the sheet filling the space the tab bar vacates. See
+              // computeSheetLayout.clipBottom. overflow: 'hidden' does the mask;
               // pointerEvents: 'box-none' lets taps pass through to the underlying
               // content in the empty top area.
               <View
                 pointerEvents="box-none"
-                style={[styles.clipRegion, { bottom: sheetBottom }]}
+                style={[styles.clipRegion, { bottom: clipBottom }]}
               >
                 <Animated.View
+                  // box-none: the sheet frame is full-height and overhangs the
+                  // tab-bar zone, so it must never be a touch target itself —
+                  // only its children (peek header, and the body when full) are.
+                  // On Android an overlapping auto view swallows taps meant for
+                  // the tab bar underneath instead of letting them fall through.
+                  pointerEvents="box-none"
                   style={[
                     styles.sheet,
                     {
+                      top: sheetTop,
                       height: sheetHeight,
                       transform: [{ translateY }],
                     },
@@ -264,7 +261,14 @@ export function SessionSheetProvider({
                       onCollapsePress={collapse}
                     />
                   </View>
-                  <View style={styles.fullBody}>
+                  {/* The body overhangs the tab bar (clipped when peeked). Make
+                      it touch-transparent unless FULL, so the tab bar below
+                      keeps receiving taps right through a collapse. */}
+                  <View
+                    testID="session-full-body"
+                    pointerEvents={expanded ? 'auto' : 'none'}
+                    style={styles.fullBody}
+                  >
                     <InSessionScreen onClose={controller.close} />
                   </View>
                 </Animated.View>
@@ -288,7 +292,7 @@ function PeekContent({
   onExpandPress: () => void;
   onCollapsePress: () => void;
 }) {
-  const { label, startedAtMs } = useContext(PeekMetaCtx);
+  const { label, startedAtMs } = useSessionPeekMeta();
   const [elapsedSec, setElapsedSec] = useState(0);
 
   useEffect(() => {
@@ -341,8 +345,10 @@ const styles = StyleSheet.create({
     zIndex: 100_000,
   },
   sheet: {
+    // Top-anchored: `top` is supplied inline (= top safe-area inset). The sheet
+    // spans the full usable height and slides via translateY; see
+    // computeSheetLayout for why the endpoints are expansion-independent.
     position: 'absolute',
-    bottom: 0,
     left: 0,
     right: 0,
     backgroundColor: colors.surface,

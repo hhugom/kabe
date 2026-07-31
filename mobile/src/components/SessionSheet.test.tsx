@@ -5,7 +5,7 @@
 jest.mock('../screens/InSessionScreen', () => {
   const React = require('react');
   const { Text } = require('react-native');
-  const { useSessionPeekPublisher } = require('./SessionSheet');
+  const { useSessionPeekPublisher } = require('./session-peek');
   return {
     InSessionScreen: () => {
       const publish = useSessionPeekPublisher();
@@ -23,9 +23,10 @@ import { TamaguiProvider } from 'tamagui';
 import tamaguiConfig from '../../tamagui.config';
 import {
   SessionSheetProvider,
-  useSessionPeekPublisher,
+  useSessionSheet,
   useSessionSheetInset,
 } from './SessionSheet';
+import { useSessionPeekPublisher } from './session-peek';
 
 afterEach(() => {
   cleanup();
@@ -96,6 +97,40 @@ describe('useSessionSheetInset', () => {
     const probe = await findByTestId('inset-probe');
     // PEEK_HEIGHT (56) + safe-area.bottom (0 in test metrics) = 56.
     expect(probe.props.children).toBe(56);
+  });
+});
+
+// Stashes the sheet controller so tests can drive openFull/collapse.
+function ControllerProbe() {
+  (globalThis as any).__sheetController = useSessionSheet();
+  return <Text testID="controller-probe">ok</Text>;
+}
+
+describe('SessionSheet — body does not steal touches from the tab bar when peeked', () => {
+  // The sheet body is full-height and overhangs the tab-bar zone; on Android an
+  // overlapping touch-target view swallows taps meant for the tab bar beneath
+  // it. RNTL can't simulate that spatial hit-test, so this guards the fix's
+  // mechanism instead: the body must be touch-transparent unless FULL.
+  afterEach(() => {
+    delete (globalThis as any).__sheetController;
+  });
+
+  it('the body is pointerEvents:none at peek and auto when the session screen is up', async () => {
+    const { findByTestId } = await wrap(<ControllerProbe />, { sessionActive: true });
+
+    const body = await findByTestId('session-full-body');
+    // Peeked at rest — the body must not intercept touches over the tab bar.
+    expect(body.props.pointerEvents).toBe('none');
+
+    await act(async () => {
+      (globalThis as any).__sheetController.openFull();
+    });
+    expect(body.props.pointerEvents).toBe('auto');
+
+    await act(async () => {
+      (globalThis as any).__sheetController.collapse();
+    });
+    expect(body.props.pointerEvents).toBe('none');
   });
 });
 

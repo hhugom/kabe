@@ -31,7 +31,9 @@ export function UpNextStrip({
   onPickSlot: (slot: PlannedSlot) => void;
   onOpenAddDrill: () => void;
 }) {
-  const queue = unfilled.filter((s) => slotIdOf(s) !== focusedSlotId);
+  // Only the single next exercise — the immediate next unfilled slot, not the
+  // full remaining queue.
+  const queue = unfilled.filter((s) => slotIdOf(s) !== focusedSlotId).slice(0, 1);
   return (
     <YStack gap={spacing.sm}>
       <Text style={[typography.label, { color: colors.textSecondary }]}>UP NEXT</Text>

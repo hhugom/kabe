@@ -28,6 +28,11 @@ export function TabBar({ state, navigation, insets }: BottomTabBarProps) {
 
   if (keyboardVisible) return null;
 
+  // Static bar. When a session is FULL the persistent sheet (SessionSheet.tsx)
+  // rises and covers it — the sheet and this bar share colors.surface, so the
+  // bottom safe-area strip reads as one continuous surface. At peek the sheet's
+  // clip retracts and the bar shows again. No transform animation: sliding this
+  // bar fought React Navigation's layout and Android touch/hit-testing.
   return (
     <View testID="tab-bar" style={[styles.bar, { paddingBottom: insets.bottom }]}>
       {state.routes.map((route, i) => {
@@ -82,7 +87,7 @@ const styles = StyleSheet.create({
   },
   tab: {
     flex: 1,
-    minHeight: 56,
+    height: 56,
     alignItems: 'center',
     justifyContent: 'center',
   },

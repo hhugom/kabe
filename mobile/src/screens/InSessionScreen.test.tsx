@@ -172,17 +172,6 @@ async function renderScreen(opts: { clock?: () => Date } = {}) {
   return result!;
 }
 
-// Reads the in-sheet three-dot and presses it. Under ADR-0004 the menu is
-// owned by InSession itself (no more navigation.setOptions indirection).
-async function pressSessionMenu(
-  findByTestId: (id: string) => Promise<any>
-) {
-  const btn = await findByTestId('insession-menu');
-  await act(async () => {
-    fireEvent.press(btn);
-  });
-}
-
 // Explicit cleanup after every test in the file — without this, React 19's
 // batching leaves the previous test's tree mounted long enough that the next
 // test's InSessionScreen sees stale state and renders empty.
@@ -407,54 +396,6 @@ describe('InSessionScreen — duration timer, wake-lock, and app-state resume', 
   });
 });
 
-describe('InSessionScreen — session menu + end-session flow', () => {
-  beforeEach(resetMocks);
-
-  it('opens the Session menu sheet from the in-sheet three-dot on the empty hero', async () => {
-    mockGetActiveSession.mockResolvedValue({ session: makeSession(), entries: [] });
-    mockGetRoutine.mockResolvedValue(null);
-    mockListDrills.mockResolvedValue([]);
-
-    const { findByTestId, queryByTestId } = await renderScreen();
-    await findByTestId('empty-hero');
-    expect(queryByTestId('session-menu-end-session')).toBeNull();
-
-    await pressSessionMenu(findByTestId);
-
-    expect(await findByTestId('session-menu-end-session')).toBeTruthy();
-  });
-
-  it('opens the Session menu sheet from the in-sheet three-dot on the focus hero', async () => {
-    seedRoutine({ plannedSets: 1, drillMetric: 'reps', drillId: 'reps-m' });
-
-    const { findByTestId, queryByTestId } = await renderScreen();
-    await findByTestId('focus-hero');
-    expect(queryByTestId('session-menu-end-session')).toBeNull();
-
-    await pressSessionMenu(findByTestId);
-
-    expect(await findByTestId('session-menu-end-session')).toBeTruthy();
-  });
-
-  it('tapping End Session in the sheet with no unfilled slots ends and signals close', async () => {
-    mockGetActiveSession.mockResolvedValue({ session: makeSession(), entries: [] });
-    mockGetRoutine.mockResolvedValue(null);
-    mockListDrills.mockResolvedValue([]);
-
-    const { findByTestId } = await renderScreen();
-    await findByTestId('empty-hero');
-
-    await pressSessionMenu(findByTestId);
-    await act(async () => {
-      fireEvent.press(await findByTestId('session-menu-end-session'));
-      await new Promise((res) => setImmediate(res));
-    });
-
-    expect(mockEndSession).toHaveBeenCalledWith(null, 'session-1', expect.anything());
-    expect(onCloseSpy).toHaveBeenCalled();
-  });
-});
-
 describe('InSessionScreen — add-a-drill from the up-next strip', () => {
   beforeEach(resetMocks);
 
@@ -507,15 +448,6 @@ describe('InSessionScreen — add-a-drill from the up-next strip', () => {
 
 describe('InSessionScreen — fused planned-slot list and up-next', () => {
   beforeEach(resetMocks);
-
-  it('unfilled planned slots (other than the focused one) appear as up-next chips', async () => {
-    seedRoutine({ plannedSets: 3, drillMetric: 'reps' });
-
-    const { findByTestId } = await renderScreen();
-
-    expect(await findByTestId('up-next-ri-1-1')).toBeTruthy();
-    expect(await findByTestId('up-next-ri-1-2')).toBeTruthy();
-  });
 
   it('tapping an up-next chip shifts focus to that slot', async () => {
     seedRoutine({
@@ -659,24 +591,6 @@ describe('InSessionScreen — fused planned-slot list and up-next', () => {
       await new Promise((res) => setImmediate(res));
     });
     expect(mockDeleteEntry).toHaveBeenCalledWith(null, 'e-1', expect.anything());
-  });
-
-  it('"Delete slot" on an empty focused slot drops it silently (no confirm)', async () => {
-    seedRoutine({ plannedSets: 3, drillMetric: 'reps' });
-
-    const { findByTestId, queryByTestId } = await renderScreen();
-    await findByTestId('focus-hero');
-    expect(await findByTestId('up-next-ri-1-1')).toBeTruthy();
-
-    await act(async () => {
-      fireEvent.press(await findByTestId('focus-delete'));
-    });
-
-    // No confirm modal — the slot was empty.
-    expect(queryByTestId('delete-slot-confirm')).toBeNull();
-    expect(mockDeleteEntry).not.toHaveBeenCalled();
-    expect(queryByTestId('up-next-ri-1-0')).toBeNull();
-    expect(await findByTestId('up-next-ri-1-2')).toBeTruthy();
   });
 
   it('ad-hoc entries render in the AD-HOC section with distinct testIDs', async () => {
@@ -894,120 +808,6 @@ describe('InSessionScreen — state-driven accent on primary action (issue #25)'
   });
 });
 
-describe('InSessionScreen — unfilled-slots modal at End Session', () => {
-  beforeEach(resetMocks);
-
-  async function tapEndSessionInSheet(findByTestId: (id: string) => Promise<any>) {
-    await pressSessionMenu(findByTestId);
-    await act(async () => {
-      fireEvent.press(await findByTestId('session-menu-end-session'));
-      await new Promise((res) => setImmediate(res));
-    });
-  }
-
-  function seedRoutineWithUnfilled({
-    drillTarget = 20 as number | null,
-    plannedSets = 2 as number | null,
-    entries = [] as DrillEntry[],
-  } = {}) {
-    return seedRoutine({
-      plannedSets,
-      drillMetric: 'reps',
-      drillTarget,
-      entries,
-    });
-  }
-
-  it('ends the session directly when there are no unfilled planned slots', async () => {
-    mockGetActiveSession.mockResolvedValue({ session: makeSession(), entries: [] });
-    mockGetRoutine.mockResolvedValue(null);
-    mockListDrills.mockResolvedValue([]);
-
-    const { findByTestId, queryByText } = await renderScreen();
-    await findByTestId('empty-hero');
-
-    await tapEndSessionInSheet(findByTestId);
-
-    expect(queryByText(/complete/i)).toBeNull();
-    expect(mockEndSession).toHaveBeenCalledWith(null, 'session-1', expect.anything());
-    expect(onCloseSpy).toHaveBeenCalled();
-  });
-
-  it('opens the modal instead of ending when at least one planned slot is unfilled', async () => {
-    seedRoutineWithUnfilled();
-
-    const { findByText, findByTestId } = await renderScreen();
-    await findByTestId('focus-hero');
-
-    await tapEndSessionInSheet(findByTestId);
-
-    expect(await findByText(/complete to target/i)).toBeTruthy();
-    expect(await findByText(/skip all/i)).toBeTruthy();
-    expect(mockEndSession).not.toHaveBeenCalled();
-    expect(onCloseSpy).not.toHaveBeenCalled();
-  });
-
-  it('Complete-to-target logs one entry per unfilled slot at the drill target, then ends the session', async () => {
-    seedRoutineWithUnfilled({ drillTarget: 20, plannedSets: 2 });
-
-    const { findByText, findByTestId } = await renderScreen();
-    await findByTestId('focus-hero');
-    await tapEndSessionInSheet(findByTestId);
-
-    await act(async () => {
-      fireEvent.press(await findByText(/complete to target/i));
-      await new Promise((res) => setImmediate(res));
-    });
-
-    expect(mockLogEntry).toHaveBeenCalledTimes(2);
-    expect(mockLogEntry.mock.calls[0][1]).toEqual(
-      expect.objectContaining({ sessionId: 'session-1', drillId: 'd-1', value: 20 })
-    );
-    expect(mockLogEntry.mock.calls[1][1]).toEqual(
-      expect.objectContaining({ sessionId: 'session-1', drillId: 'd-1', value: 20 })
-    );
-    expect(mockEndSession).toHaveBeenCalledWith(null, 'session-1', expect.anything());
-    expect(onCloseSpy).toHaveBeenCalled();
-  });
-
-  it('Skip all ends the session without logging any new entries', async () => {
-    seedRoutineWithUnfilled({ drillTarget: 20, plannedSets: 2 });
-
-    const { findByText, findByTestId } = await renderScreen();
-    await findByTestId('focus-hero');
-    await tapEndSessionInSheet(findByTestId);
-
-    await act(async () => {
-      fireEvent.press(await findByText(/skip all/i));
-      await new Promise((res) => setImmediate(res));
-    });
-
-    expect(mockLogEntry).not.toHaveBeenCalled();
-    expect(mockEndSession).toHaveBeenCalledWith(null, 'session-1', expect.anything());
-    expect(onCloseSpy).toHaveBeenCalled();
-  });
-
-  it('hardware back on the unfilled modal cancels: session stays active, still in-sheet', async () => {
-    seedRoutineWithUnfilled();
-
-    const { findByTestId } = await renderScreen();
-    await findByTestId('focus-hero');
-    await tapEndSessionInSheet(findByTestId);
-
-    // Find the modal that carries the unfilled-slots title (multiple modals
-    // mount, only one is currently `visible: true`).
-    const modal = [...modalProps].reverse().find((p) => p.visible);
-    expect(modal).toBeTruthy();
-    await act(async () => {
-      modal!.onRequestClose();
-    });
-
-    expect(mockEndSession).not.toHaveBeenCalled();
-    expect(onCloseSpy).not.toHaveBeenCalled();
-    expect(await findByTestId('focus-hero')).toBeTruthy();
-  });
-});
-
 describe('InSessionScreen — mid-timer switch confirm modal (replaces Alert.alert)', () => {
   beforeEach(resetMocks);
 
@@ -1138,5 +938,73 @@ describe('InSessionScreen — finish hero appears when all planned slots are fil
 
     expect(mockEndSession).toHaveBeenCalledWith(null, 'session-1', expect.anything());
     expect(onCloseSpy).toHaveBeenCalled();
+  });
+
+  it('"Add another drill" on the finish hero opens the sheet and focuses the picked drill', async () => {
+    seedRoutine({
+      plannedSets: 1,
+      drillMetric: 'reps',
+      drillId: 'd-1',
+      entries: [makeEntry({ id: 'e-1', drillId: 'd-1', value: 42 })],
+    });
+
+    const { findByText, findByTestId, queryByTestId } = await renderScreen();
+
+    expect(await findByTestId('finish-hero')).toBeTruthy();
+
+    await act(async () => {
+      fireEvent.press(await findByText('Add another drill'));
+    });
+    await act(async () => {
+      fireEvent.press(await findByTestId('add-a-drill-row-d-1'));
+    });
+
+    // Picking an ad-hoc drill must leave the finish hero and drop the user into
+    // the focus card so they can log it.
+    expect(await findByTestId('focus-hero')).toBeTruthy();
+    expect(queryByTestId('finish-hero')).toBeNull();
+  });
+});
+
+describe('InSessionScreen — streamlined card + up-next', () => {
+  beforeEach(resetMocks);
+
+  it('renders no Cancel button on the focus card', async () => {
+    seedRoutine({ plannedSets: 1, drillMetric: 'reps' });
+
+    const { findByTestId, queryByTestId } = await renderScreen();
+    await findByTestId('focus-hero');
+
+    expect(queryByTestId('focus-cancel')).toBeNull();
+  });
+
+  it('renders no Delete affordance on the focus card of a planned slot', async () => {
+    seedRoutine({ plannedSets: 1, drillMetric: 'reps' });
+
+    const { findByTestId, queryByTestId } = await renderScreen();
+    await findByTestId('focus-hero');
+
+    expect(queryByTestId('focus-delete')).toBeNull();
+  });
+
+  it('renders no three-dot session menu affordance', async () => {
+    seedRoutine({ plannedSets: 1, drillMetric: 'reps' });
+
+    const { findByTestId, queryByTestId } = await renderScreen();
+    await findByTestId('focus-hero');
+
+    expect(queryByTestId('insession-menu')).toBeNull();
+  });
+
+  it('up next shows only the single next exercise (plus the add-drill chip)', async () => {
+    seedRoutine({ plannedSets: 3, drillMetric: 'reps' });
+
+    const { findByTestId, queryByTestId } = await renderScreen();
+    await findByTestId('focus-hero');
+
+    // Focus is ri-1-0; the next unfilled slot is ri-1-1 — and only that one.
+    expect(await findByTestId('up-next-ri-1-1')).toBeTruthy();
+    expect(queryByTestId('up-next-ri-1-2')).toBeNull();
+    expect(await findByTestId('up-next-add-drill')).toBeTruthy();
   });
 });

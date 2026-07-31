@@ -16,7 +16,7 @@
 //   - Uppercase structural labels ≥ 12 sp; content text uses textPrimary at
 //     ≥ 16 sp (per ergonomic-minima.md § Numeric floor).
 
-import { Pressable, StyleSheet, TextInput } from 'react-native';
+import { Pressable, TextInput } from 'react-native';
 import { Text, View, XStack, YStack } from 'tamagui';
 import { AppButton } from '../../components/AppButton';
 import { Icon, type IconName } from '../../components/Icon';
@@ -35,9 +35,6 @@ export type FocusHeroHandlers = {
   onSaveEntry: () => void;
   onStartTimer: () => void;
   onStopTimer: () => void;
-  onCancel: () => void;
-  // Undefined when the focus is an ad-hoc drill (no planned slot to delete).
-  onDeleteSlot?: () => void;
 };
 
 export function FocusHero({
@@ -78,7 +75,6 @@ export function FocusHero({
           doneCount={doneCount}
           totalCount={totalCount}
           allDone={allDone}
-          onDeleteSlot={handlers.onDeleteSlot}
         />
 
         {drill.metric === 'duration' && draft.kind === 'duration' ? (
@@ -88,7 +84,6 @@ export function FocusHero({
             clock={clock}
             onStart={handlers.onStartTimer}
             onStop={handlers.onStopTimer}
-            onCancel={handlers.onCancel}
           />
         ) : drill.metric === 'accuracy' && draft.kind === 'accuracy' ? (
           <AccuracyFocus
@@ -98,7 +93,6 @@ export function FocusHero({
             onUpdateValue={handlers.onUpdateValue}
             onUpdateAttempted={handlers.onUpdateAttempted}
             onSave={handlers.onSaveEntry}
-            onCancel={handlers.onCancel}
           />
         ) : drill.metric === 'reps' && draft.kind === 'reps' ? (
           <RepsFocus
@@ -107,7 +101,6 @@ export function FocusHero({
             canSave={canSaveDraft(state)}
             onUpdateValue={handlers.onUpdateValue}
             onSave={handlers.onSaveEntry}
-            onCancel={handlers.onCancel}
           />
         ) : null}
       </YStack>
@@ -121,14 +114,12 @@ function FocusHeroHeader({
   doneCount,
   totalCount,
   allDone,
-  onDeleteSlot,
 }: {
   drill: Drill;
   isAdHoc: boolean;
   doneCount: number;
   totalCount: number;
   allDone: boolean;
-  onDeleteSlot?: () => void;
 }) {
   return (
     <YStack>
@@ -136,39 +127,19 @@ function FocusHeroHeader({
         <Text style={[typography.label, { color: colors.accent }]}>
           {isAdHoc ? 'AD-HOC' : 'NOW'}
         </Text>
-        <XStack alignItems="center" gap={spacing.sm}>
-          {totalCount > 0 ? (
-            <Text
-              testID="session-counter"
-              style={[
-                typography.label,
-                // Counter is a structural label ≥ 12 sp — allowed to stay in
-                // textSecondary per ergonomic-minima. Magenta on all-done.
-                { color: allDone ? colors.accentMagenta : colors.textSecondary },
-              ]}
-            >
-              {doneCount}/{totalCount}
-            </Text>
-          ) : null}
-          {onDeleteSlot ? (
-            // Delete lives in a visually distinct region (top-right of the
-            // hero card, not inline with the bottom primary) per
-            // navigation-surface.md § Two hard rules + ergonomic-minima.md
-            // § Numeric floor destructive-adjacent rule.
-            <Pressable
-              testID="focus-delete"
-              accessibilityRole="button"
-              accessibilityLabel="Delete slot"
-              onPress={onDeleteSlot}
-              style={styles.deleteBtn}
-            >
-              <Icon name="delete" size={18} color={colors.danger} />
-              <Text style={[typography.label, { color: colors.danger, marginLeft: 4 }]}>
-                DELETE
-              </Text>
-            </Pressable>
-          ) : null}
-        </XStack>
+        {totalCount > 0 ? (
+          <Text
+            testID="session-counter"
+            style={[
+              typography.label,
+              // Counter is a structural label ≥ 12 sp — allowed to stay in
+              // textSecondary per ergonomic-minima. Magenta on all-done.
+              { color: allDone ? colors.accentMagenta : colors.textSecondary },
+            ]}
+          >
+            {doneCount}/{totalCount}
+          </Text>
+        ) : null}
       </XStack>
       <Text style={typography.title} numberOfLines={2}>
         {drill.name}
@@ -189,14 +160,12 @@ function RepsFocus({
   canSave,
   onUpdateValue,
   onSave,
-  onCancel,
 }: {
   drill: Drill;
   draft: { kind: 'reps'; value: string };
   canSave: boolean;
   onUpdateValue: (s: string) => void;
   onSave: () => void;
-  onCancel: () => void;
 }) {
   const target = drill.target;
   const draftValue = Number(draft.value || '0') || 0;
@@ -236,7 +205,6 @@ function RepsFocus({
         onPrimary={onSave}
         primaryDisabled={!canSave}
         primaryAccent={primaryAccent}
-        onCancel={onCancel}
       />
     </YStack>
   );
@@ -249,7 +217,6 @@ function AccuracyFocus({
   onUpdateValue,
   onUpdateAttempted,
   onSave,
-  onCancel,
 }: {
   drill: Drill;
   draft: { kind: 'accuracy'; value: string; attempted: string };
@@ -257,7 +224,6 @@ function AccuracyFocus({
   onUpdateValue: (s: string) => void;
   onUpdateAttempted: (s: string) => void;
   onSave: () => void;
-  onCancel: () => void;
 }) {
   const target = drill.target;
   const successes = Number(draft.value || '0') || 0;
@@ -310,7 +276,6 @@ function AccuracyFocus({
         onPrimary={onSave}
         primaryDisabled={!canSave}
         primaryAccent={primaryAccent}
-        onCancel={onCancel}
       />
     </YStack>
   );
@@ -322,14 +287,12 @@ function DurationFocus({
   clock,
   onStart,
   onStop,
-  onCancel,
 }: {
   drill: Drill;
   timerStartedAt: Date | null;
   clock: () => Date;
   onStart: () => void;
   onStop: () => void;
-  onCancel: () => void;
 }) {
   const elapsedSeconds = timerStartedAt
     ? Math.max(0, Math.floor((clock().getTime() - timerStartedAt.getTime()) / 1000))
@@ -364,71 +327,59 @@ function DurationFocus({
         onPrimary={running ? onStop : onStart}
         primaryDisabled={false}
         primaryAccent={primaryAccent}
-        onCancel={onCancel}
       />
     </YStack>
   );
 }
 
-// ---------------- primary action row (bottom-anchored + ghost Cancel) --
+// ---------------- primary action row (bottom-anchored) --
 
-// Bottom-anchored primary (single filled full-width button) with the
-// canonical ghost Cancel directly below, per navigation-surface.md § Primary
-// action pattern § Two hard rules.
+// Bottom-anchored primary: a single filled full-width button. The former ghost
+// Cancel beneath it was retired — the card no longer carries a Cancel/Delete.
 function PrimaryActions({
   primaryLabel,
   primaryIcon,
   onPrimary,
   primaryDisabled,
   primaryAccent,
-  onCancel,
 }: {
   primaryLabel: string;
   primaryIcon: IconName;
   onPrimary: () => void;
   primaryDisabled: boolean;
   primaryAccent: string;
-  onCancel: () => void;
 }) {
   return (
-    <YStack gap={spacing.sm}>
-      <Pressable
-        testID="primary-action"
-        accessibilityRole="button"
-        accessibilityLabel={primaryLabel}
-        accessibilityState={{ disabled: primaryDisabled }}
-        onPress={onPrimary}
-        disabled={primaryDisabled}
+    <Pressable
+      testID="primary-action"
+      accessibilityRole="button"
+      accessibilityLabel={primaryLabel}
+      accessibilityState={{ disabled: primaryDisabled }}
+      onPress={onPrimary}
+      disabled={primaryDisabled}
+      style={{
+        minHeight: 56,
+        borderRadius: radius.md,
+        backgroundColor: primaryAccent,
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexDirection: 'row',
+        opacity: primaryDisabled ? 0.5 : 1,
+        paddingHorizontal: spacing.lg,
+      }}
+    >
+      <Icon name={primaryIcon} size={22} color={colors.onAccent} />
+      <Text
         style={{
-          minHeight: 56,
-          borderRadius: radius.md,
-          backgroundColor: primaryAccent,
-          alignItems: 'center',
-          justifyContent: 'center',
-          flexDirection: 'row',
-          opacity: primaryDisabled ? 0.5 : 1,
-          paddingHorizontal: spacing.lg,
+          color: colors.onAccent,
+          fontSize: 18,
+          fontWeight: '800',
+          marginLeft: spacing.sm,
         }}
       >
-        <Icon name={primaryIcon} size={22} color={colors.onAccent} />
-        <Text
-          style={{
-            color: colors.onAccent,
-            fontSize: 18,
-            fontWeight: '800',
-            marginLeft: spacing.sm,
-          }}
-        >
-          {primaryLabel}
-        </Text>
-      </Pressable>
-      <AppButton
-        title="Cancel"
-        variant="ghost"
-        testID="focus-cancel"
-        onPress={onCancel}
-      />
-    </YStack>
+        {primaryLabel}
+      </Text>
+    </Pressable>
   );
 }
 
@@ -659,14 +610,3 @@ export function FinishHero({
   );
 }
 
-const styles = StyleSheet.create({
-  deleteBtn: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    minHeight: 48,
-    paddingHorizontal: spacing.sm,
-    borderRadius: radius.sm,
-    borderWidth: 1,
-    borderColor: colors.danger,
-  },
-});

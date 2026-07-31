@@ -132,7 +132,8 @@ describe('TabBar', () => {
     const { findByTestId } = await render(<TabBar {...makeProps()} />);
     for (const name of ['Home', 'Drills', 'Stats']) {
       const style = flatStyle(await findByTestId(`tab-touch-${name}`));
-      expect(style.minHeight).toBeGreaterThanOrEqual(56);
+      // Fixed height or a floor both satisfy the ≥56 dp tap-target minimum.
+      expect(style.height ?? style.minHeight).toBeGreaterThanOrEqual(56);
     }
   });
 
