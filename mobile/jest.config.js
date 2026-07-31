@@ -23,6 +23,7 @@ module.exports = {
       testMatch: [
         '<rootDir>/src/screens/**/*.test.tsx',
         '<rootDir>/src/components/**/*.test.tsx',
+        '<rootDir>/src/layout/**/*.test.{ts,tsx}',
       ],
       setupFilesAfterEnv: ['<rootDir>/src/test-setup.ui.ts'],
       transformIgnorePatterns: [

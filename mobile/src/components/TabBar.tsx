@@ -1,7 +1,9 @@
 import type { BottomTabBarProps } from '@react-navigation/bottom-tabs';
 import { useEffect, useState } from 'react';
-import { Keyboard, Pressable, StyleSheet, Text, View } from 'react-native';
+import { Animated, Keyboard, Pressable, StyleSheet, Text, View } from 'react-native';
 import { Icon, type IconName } from './Icon';
+import { tabBarSlideInterpolation, tabBarTravel } from '../layout/tab-bar';
+import { useSheetSlide } from './session-sheet-slide';
 import { colors, radius, spacing } from '../theme';
 
 const ICON_FOR: Record<string, IconName> = {
@@ -16,6 +18,7 @@ function iconFor(routeName: string): IconName {
 
 export function TabBar({ state, navigation, insets }: BottomTabBarProps) {
   const [keyboardVisible, setKeyboardVisible] = useState(false);
+  const slide = useSheetSlide();
 
   useEffect(() => {
     const show = Keyboard.addListener('keyboardDidShow', () => setKeyboardVisible(true));
@@ -28,13 +31,34 @@ export function TabBar({ state, navigation, insets }: BottomTabBarProps) {
 
   if (keyboardVisible) return null;
 
-  // Static bar. When a session is FULL the persistent sheet (SessionSheet.tsx)
-  // rises and covers it — the sheet and this bar share colors.surface, so the
-  // bottom safe-area strip reads as one continuous surface. At peek the sheet's
-  // clip retracts and the bar shows again. No transform animation: sliding this
-  // bar fought React Navigation's layout and Android touch/hit-testing.
+  // When a session sheet is mounted, the bar slides down in lockstep with it:
+  // at PEEK the interpolation resolves to translateY 0 (identity — bar at rest,
+  // touch area valid), and as the sheet rises to FULL the bar slides its full
+  // height off the bottom edge, where the sheet has taken its place. The value
+  // is the sheet's own JS-driven translateY (see session-sheet-slide), so bar
+  // and sheet fill never desync. No session → `slide` is null and the bar is a
+  // plain static strip. Applying the transform to the bar itself (not a wrapper)
+  // keeps it clear of React Navigation's tab-bar container clip.
+  const slideTransform = slide
+    ? {
+        transform: [
+          {
+            translateY: slide.translateY.interpolate(
+              tabBarSlideInterpolation({
+                peekTranslate: slide.peekTranslate,
+                tabBarTravel: tabBarTravel(insets.bottom),
+              })
+            ),
+          },
+        ],
+      }
+    : null;
+
   return (
-    <View testID="tab-bar" style={[styles.bar, { paddingBottom: insets.bottom }]}>
+    <Animated.View
+      testID="tab-bar"
+      style={[styles.bar, { paddingBottom: insets.bottom }, slideTransform]}
+    >
       {state.routes.map((route, i) => {
         const focused = i === state.index;
         const onPress = () => {
@@ -72,7 +96,7 @@ export function TabBar({ state, navigation, insets }: BottomTabBarProps) {
           </Pressable>
         );
       })}
-    </View>
+    </Animated.View>
   );
 }
 

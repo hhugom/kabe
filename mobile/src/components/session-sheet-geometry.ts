@@ -8,9 +8,9 @@
 // bottom safe-area — the clip mask drops to `insetBottom` to reveal it. At PEEK
 // the mask stops above the tab bar so the tab bar stays visible.
 //
-// `sheetTop`, `sheetHeight`, and `peekTranslate` are deliberately independent
-// of `expanded`: only the mask (`clipBottom`) toggles with expansion, so the
-// slide animation has stable endpoints and never snaps mid-flight.
+// All four outputs are independent of the snap point: the sheet interpolates
+// the mask between the two `clipBottom*` endpoints off translateY (see
+// SessionSheet), so the slide has stable endpoints and never snaps mid-flight.
 
 import { TAB_BAR_HEIGHT } from '../layout/tab-bar';
 
@@ -23,8 +23,6 @@ export type SheetLayoutInput = {
   insetBottom: number;
   // True when the tab bar is present (tab-root routes); false on push routes.
   tabBarVisible: boolean;
-  // True while the session screen is up (FULL); false at PEEK.
-  expanded: boolean;
 };
 
 export type SheetLayout = {
@@ -34,8 +32,12 @@ export type SheetLayout = {
   sheetHeight: number;
   // translateY at the PEEK snap point (FULL is always 0).
   peekTranslate: number;
-  // Bottom offset of the clip mask from the screen bottom.
-  clipBottom: number;
+  // Clip-mask bottom offset at FULL — drops to the safe area so the sheet
+  // covers the vacated tab-bar zone.
+  clipBottomFull: number;
+  // Clip-mask bottom offset at PEEK — reserves the tab-bar strip so the bar
+  // shows through below the peek header.
+  clipBottomPeek: number;
 };
 
 export function computeSheetLayout({
@@ -43,7 +45,6 @@ export function computeSheetLayout({
   insetTop,
   insetBottom,
   tabBarVisible,
-  expanded,
 }: SheetLayoutInput): SheetLayout {
   const tabReserve = tabBarVisible ? TAB_BAR_HEIGHT : 0;
 
@@ -53,12 +54,13 @@ export function computeSheetLayout({
   const sheetHeight = screenHeight - insetTop - insetBottom;
 
   // Slide down far enough that the peek header's bottom meets the tab-bar top
-  // line (or the safe-area line on push routes). Independent of `expanded`.
+  // line (or the safe-area line on push routes).
   const peekTranslate = sheetHeight - PEEK_HEIGHT - tabReserve;
 
-  // FULL reveals down to the safe area (tab bar has slid away); PEEK reserves
-  // the tab-bar strip so the tab bar shows through below the peek header.
-  const clipBottom = insetBottom + (expanded ? 0 : tabReserve);
+  // The two snap-point endpoints the mask animates between: FULL reveals down
+  // to the safe area (tab bar has slid away); PEEK reserves the tab-bar strip.
+  const clipBottomFull = insetBottom;
+  const clipBottomPeek = insetBottom + tabReserve;
 
-  return { sheetTop, sheetHeight, peekTranslate, clipBottom };
+  return { sheetTop, sheetHeight, peekTranslate, clipBottomFull, clipBottomPeek };
 }

@@ -49,6 +49,7 @@ import { formatMmSs } from '../lib/format';
 import { InSessionScreen } from '../screens/InSessionScreen';
 import { colors, radius, spacing } from '../theme';
 import { computeSheetLayout, PEEK_HEIGHT } from './session-sheet-geometry';
+import { SheetSlideCtx, type SheetSlide } from './session-sheet-slide';
 import {
   PeekMetaCtx,
   PeekPublisherCtx,
@@ -114,15 +115,36 @@ export function SessionSheetProvider({
   }, [sessionActive]);
 
   const [expanded, setExpanded] = useState(false);
-  const { sheetTop, sheetHeight, peekTranslate, clipBottom } = computeSheetLayout({
-    screenHeight: screenH,
-    insetTop: insets.top,
-    insetBottom: insets.bottom,
-    tabBarVisible,
-    expanded,
-  });
+  // Clip-fill endpoints (clipBottomFull/Peek): at FULL the mask drops to reveal
+  // the sheet over the tab-bar zone; at PEEK it stops above the bar so the bar
+  // shows through. The mask interpolates between them off translateY (below) so
+  // the fill tracks the bar continuously instead of snapping — the snap is what
+  // made the down-slide look bad.
+  const { sheetTop, sheetHeight, peekTranslate, clipBottomFull, clipBottomPeek } =
+    computeSheetLayout({
+      screenHeight: screenH,
+      insetTop: insets.top,
+      insetBottom: insets.bottom,
+      tabBarVisible,
+    });
 
   const translateY = useRef(new Animated.Value(peekTranslate)).current;
+
+  // Clip mask bottom, driven by the same value as the sheet + tab bar so all
+  // three move in exact lockstep. Falls back to the static peek value on
+  // degenerate geometry (peekTranslate ≤ 0) where interpolate can't build a
+  // monotonic input range.
+  const clipBottom = useMemo(
+    () =>
+      peekTranslate > 0
+        ? translateY.interpolate({
+            inputRange: [0, peekTranslate],
+            outputRange: [clipBottomFull, clipBottomPeek],
+            extrapolate: 'clamp',
+          })
+        : clipBottomPeek,
+    [translateY, peekTranslate, clipBottomFull, clipBottomPeek]
+  );
   // Ref mirror so pan handlers (which capture at creation time) always see
   // the latest value without recreating the responder.
   const expandedRef = useRef(false);
@@ -132,7 +154,11 @@ export function SessionSheetProvider({
       Animated.spring(translateY, {
         toValue,
         velocity,
-        useNativeDriver: true,
+        // JS-driven (not native): the tab bar and the clip fill both derive
+        // from this single value so they move in exact lockstep, and a
+        // JS-driven layout keeps Android's touch hit-area following the bar —
+        // the native driver left it stale after settling (first taps swallowed).
+        useNativeDriver: false,
         bounciness: 4,
         speed: 16,
       }).start();
@@ -217,12 +243,19 @@ export function SessionSheetProvider({
 
   const inset = sessionActive ? PEEK_HEIGHT + insets.bottom : 0;
 
+  // Bridge the live slide to the tab bar (across the React-Navigation tabBar
+  // boundary). null when no session → TabBar stays a plain static bar.
+  const slide = useMemo<SheetSlide | null>(
+    () => (sessionActive ? { translateY, peekTranslate } : null),
+    [sessionActive, translateY, peekTranslate]
+  );
+
   return (
     <Ctx.Provider value={controller}>
       <InsetCtx.Provider value={inset}>
         <PeekPublisherCtx.Provider value={publishPeekMeta}>
           <PeekMetaCtx.Provider value={peekMeta}>
-            {children}
+            <SheetSlideCtx.Provider value={slide}>{children}</SheetSlideCtx.Provider>
             {sessionActive ? (
               // Clip region masks the sheet body. At PEEK its bottom sits at the
               // top of the tab bar (or bottom safe-area on push routes) so the
@@ -231,7 +264,7 @@ export function SessionSheetProvider({
               // computeSheetLayout.clipBottom. overflow: 'hidden' does the mask;
               // pointerEvents: 'box-none' lets taps pass through to the underlying
               // content in the empty top area.
-              <View
+              <Animated.View
                 pointerEvents="box-none"
                 style={[styles.clipRegion, { bottom: clipBottom }]}
               >
@@ -272,7 +305,7 @@ export function SessionSheetProvider({
                     <InSessionScreen onClose={controller.close} />
                   </View>
                 </Animated.View>
-              </View>
+              </Animated.View>
             ) : null}
           </PeekMetaCtx.Provider>
         </PeekPublisherCtx.Provider>
