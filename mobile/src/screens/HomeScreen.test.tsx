@@ -3,11 +3,15 @@ import { TamaguiProvider } from 'tamagui';
 import tamaguiConfig from '../../tamagui.config';
 import { HomeScreen } from './HomeScreen';
 import { SessionActionsProvider } from '../components/session-actions';
-import type { RecentSession } from '../use-cases/recent-sessions';
+import type { HistorySession } from '../use-cases/session-history';
 import { listRecentSessions } from '../use-cases/recent-sessions';
 
 jest.mock('../db/client', () => ({ getAppDb: jest.fn(() => null) }));
 jest.mock('../use-cases/recent-sessions', () => ({ listRecentSessions: jest.fn() }));
+// HomeScreen uses navigation for the "View history" link; these tests don't mount a
+// NavigationContainer, so stub useNavigation with a capturable navigate mock.
+const mockNavigate = jest.fn();
+jest.mock('@react-navigation/native', () => ({ useNavigation: () => ({ navigate: mockNavigate }) }));
 
 const mockListRecentSessions = listRecentSessions as jest.MockedFunction<
   typeof listRecentSessions
@@ -16,6 +20,7 @@ const mockListRecentSessions = listRecentSessions as jest.MockedFunction<
 beforeEach(() => {
   mockListRecentSessions.mockReset();
   mockListRecentSessions.mockResolvedValue([]);
+  mockNavigate.mockReset();
 });
 
 async function renderHome(
@@ -93,19 +98,33 @@ describe('HomeScreen', () => {
     expect(await findByText('No recent practice yet')).toBeTruthy();
   });
 
-  it('lists recent sessions when there are some', async () => {
-    const session: RecentSession = {
+  it('lists recent sessions as cards when there are some', async () => {
+    const session: HistorySession = {
       id: 's1',
       startedAt: '2026-06-30T09:00:00.000Z',
+      endedAt: '2026-06-30T09:30:00.000Z',
       routineName: 'Wall warmup',
-      drillCount: 3,
+      drills: [],
     };
     mockListRecentSessions.mockResolvedValue([session]);
     const { findAllByTestId, getByText } = await renderHome();
 
-    expect(await findAllByTestId('recent-session-row')).toHaveLength(1);
+    expect(await findAllByTestId('history-session-card')).toHaveLength(1);
     expect(getByText('Wall warmup')).toBeTruthy();
-    expect(getByText('3 drills')).toBeTruthy();
   });
 
+  it('navigates to the History screen when "View history" is tapped', async () => {
+    mockListRecentSessions.mockResolvedValue([
+      {
+        id: 's1',
+        startedAt: '2026-06-30T09:00:00.000Z',
+        endedAt: '2026-06-30T09:30:00.000Z',
+        routineName: 'Wall warmup',
+        drills: [],
+      },
+    ]);
+    const { findByText } = await renderHome();
+    fireEvent.press(await findByText('View history'));
+    expect(mockNavigate).toHaveBeenCalledWith('History');
+  });
 });

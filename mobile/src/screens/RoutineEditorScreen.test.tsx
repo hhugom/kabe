@@ -59,7 +59,7 @@ function makeDrill(over: Partial<Drill>): Drill {
     name: over.name ?? 'A drill',
     category: over.category ?? 'wall',
     metric: over.metric ?? 'reps',
-    target: over.target ?? null,
+    target: over.target ?? 20,
     notes: over.notes ?? null,
     createdAt: NOW,
     updatedAt: NOW,

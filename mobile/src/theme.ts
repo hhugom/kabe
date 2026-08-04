@@ -15,6 +15,7 @@ export const colors = {
   accentPressed: '#00B8CC',
   accentSoft: '#1D2A36',
   accentAmber: '#FFC933',
+  accentGreen: '#3DE08A',
   accentMagenta: '#FF3D71',
   danger: '#FF6B6B',
   dangerPressed: '#CC5555',

@@ -4,4 +4,5 @@ export type RootStackParamList = {
   Drills: undefined;
   ArchetypesDemo: undefined;
   RowsDemo: undefined;
+  History: undefined;
 };

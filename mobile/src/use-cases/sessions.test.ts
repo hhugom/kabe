@@ -18,7 +18,7 @@ const clock = () => new Date(FIXED_NOW);
 
 async function insertDrill(
   db: TestDb,
-  over: { id?: string; metric?: 'reps' | 'duration' | 'accuracy'; target?: number | null } = {}
+  over: { id?: string; metric?: 'reps' | 'duration' | 'accuracy'; target?: number } = {}
 ) {
   const id = over.id ?? uuidv4();
   const now = FIXED_NOW;
@@ -27,7 +27,7 @@ async function insertDrill(
     name: 'A drill',
     category: 'wall',
     metric: over.metric ?? 'reps',
-    target: over.target ?? null,
+    target: over.target ?? 20,
     notes: null,
     createdAt: now,
     updatedAt: now,
@@ -252,7 +252,7 @@ describe('logEntry', () => {
       name: 'Archived',
       category: 'wall',
       metric: 'reps',
-      target: null,
+      target: 20,
       notes: null,
       createdAt: FIXED_NOW,
       updatedAt: FIXED_NOW,

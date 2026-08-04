@@ -5,7 +5,7 @@ export const drills = sqliteTable('drills', {
   name: text('name').notNull(),
   category: text('category', { enum: ['wall', 'service'] }).notNull(),
   metric: text('metric', { enum: ['reps', 'duration', 'accuracy'] }).notNull(),
-  target: integer('target'),
+  target: integer('target').notNull(),
   notes: text('notes'),
   createdAt: text('created_at').notNull(),
   updatedAt: text('updated_at').notNull(),

@@ -18,15 +18,16 @@ export async function listDrills(
   return query.where(isNull(drills.deletedAt)).all() as Promise<Drill[]>;
 }
 
-const SEED_DRILLS: Array<Pick<NewDrillRow, 'name' | 'category' | 'metric'>> = [
-  { name: 'Forehand crosscourt rally', category: 'wall', metric: 'duration' },
-  { name: 'Backhand rally', category: 'wall', metric: 'duration' },
-  { name: 'Alternating FH/BH rally', category: 'wall', metric: 'duration' },
-  { name: 'Volley sequence close to wall', category: 'wall', metric: 'duration' },
-  { name: 'Flat 1st serve, deuce box', category: 'service', metric: 'accuracy' },
-  { name: 'Flat 1st serve, ad box', category: 'service', metric: 'accuracy' },
-  { name: 'Slice serve wide', category: 'service', metric: 'accuracy' },
-  { name: 'Second serve, body', category: 'service', metric: 'accuracy' },
+// Targets are in the metric's units: duration in seconds, accuracy as a percentage.
+const SEED_DRILLS: Array<Pick<NewDrillRow, 'name' | 'category' | 'metric' | 'target'>> = [
+  { name: 'Forehand crosscourt rally', category: 'wall', metric: 'duration', target: 120 },
+  { name: 'Backhand rally', category: 'wall', metric: 'duration', target: 120 },
+  { name: 'Alternating FH/BH rally', category: 'wall', metric: 'duration', target: 180 },
+  { name: 'Volley sequence close to wall', category: 'wall', metric: 'duration', target: 90 },
+  { name: 'Flat 1st serve, deuce box', category: 'service', metric: 'accuracy', target: 65 },
+  { name: 'Flat 1st serve, ad box', category: 'service', metric: 'accuracy', target: 65 },
+  { name: 'Slice serve wide', category: 'service', metric: 'accuracy', target: 60 },
+  { name: 'Second serve, body', category: 'service', metric: 'accuracy', target: 70 },
 ];
 
 export async function seedIfEmpty(db: Db): Promise<void> {
@@ -39,7 +40,7 @@ export async function seedIfEmpty(db: Db): Promise<void> {
     name: d.name,
     category: d.category,
     metric: d.metric,
-    target: null,
+    target: d.target,
     notes: null,
     createdAt: now,
     updatedAt: now,

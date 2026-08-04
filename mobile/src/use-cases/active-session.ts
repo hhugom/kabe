@@ -287,14 +287,11 @@ async function refreshEntries(state: ActiveSessionState, db: Db): Promise<Active
 
 function draftForMetric(drill: Drill): EntryDraft {
   if (drill.metric === 'duration') return { kind: 'duration' };
+  // Every drill has a target (mandatory) — pre-fill the draft from it.
   if (drill.metric === 'accuracy') {
-    return {
-      kind: 'accuracy',
-      value: '',
-      attempted: drill.target != null ? String(drill.target) : '',
-    };
+    return { kind: 'accuracy', value: '', attempted: String(drill.target) };
   }
-  return { kind: 'reps', value: drill.target != null ? String(drill.target) : '' };
+  return { kind: 'reps', value: String(drill.target) };
 }
 
 function draftFromEntry(drill: Drill, entry: DrillEntry): EntryDraft {

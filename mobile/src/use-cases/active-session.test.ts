@@ -29,7 +29,7 @@ async function insertDrill(
     id?: string;
     name?: string;
     metric?: 'reps' | 'duration' | 'accuracy';
-    target?: number | null;
+    target?: number;
   } = {}
 ) {
   const id = over.id ?? uuidv4();
@@ -38,7 +38,7 @@ async function insertDrill(
     name: over.name ?? 'A drill',
     category: 'wall',
     metric: over.metric ?? 'reps',
-    target: over.target ?? null,
+    target: over.target ?? 20,
     notes: null,
     createdAt: FIXED_NOW,
     updatedAt: FIXED_NOW,
@@ -110,19 +110,7 @@ describe('hydrate', () => {
 });
 
 describe('pickDrill', () => {
-  it('sets pickedDrill and opens a reps draft with empty value when no target', async () => {
-    const db = createTestDb();
-    await startSession(db, { now: clock });
-    const d = await insertDrill(db, { name: 'Wall rally', metric: 'reps' });
-    const state = (await hydrate(db))!;
-
-    const next = pickDrill(state, d);
-
-    expect(next.pickedDrill?.id).toBe(d);
-    expect(next.draft).toEqual({ kind: 'reps', value: '' });
-  });
-
-  it('defaults reps draft value to the drill target when set', async () => {
+  it('sets pickedDrill and defaults the reps draft value to the drill target', async () => {
     const db = createTestDb();
     await startSession(db, { now: clock });
     const d = await insertDrill(db, { name: 'Wall rally', metric: 'reps', target: 50 });
@@ -130,6 +118,7 @@ describe('pickDrill', () => {
 
     const next = pickDrill(state, d);
 
+    expect(next.pickedDrill?.id).toBe(d);
     expect(next.draft).toEqual({ kind: 'reps', value: '50' });
   });
 
@@ -146,17 +135,6 @@ describe('pickDrill', () => {
     const next = pickDrill(state, d);
 
     expect(next.draft).toEqual({ kind: 'accuracy', value: '', attempted: '25' });
-  });
-
-  it('opens an accuracy draft with empty attempted when no drill target', async () => {
-    const db = createTestDb();
-    await startSession(db, { now: clock });
-    const d = await insertDrill(db, { name: 'Serve accuracy', metric: 'accuracy' });
-    const state = (await hydrate(db))!;
-
-    const next = pickDrill(state, d);
-
-    expect(next.draft).toEqual({ kind: 'accuracy', value: '', attempted: '' });
   });
 
   it('opens a duration draft for a duration drill (no text input state)', async () => {
@@ -293,7 +271,9 @@ describe('saveEntry', () => {
     const db = createTestDb();
     await startSession(db, { now: clock });
     const d = await insertDrill(db, { metric: 'accuracy' });
-    const state = updateDraftValue(pickDrill((await hydrate(db))!, d), '16');
+    // Clear the attempted field the target pre-fills, so it's genuinely missing.
+    const picked = updateDraftValue(pickDrill((await hydrate(db))!, d), '16');
+    const state = updateDraftAttempted(picked, '');
 
     await expect(saveEntry(state, db, { now: clock })).rejects.toThrow();
   });

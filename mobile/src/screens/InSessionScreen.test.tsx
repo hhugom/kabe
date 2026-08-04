@@ -119,7 +119,7 @@ function makeDrill(over: Partial<Drill>): Drill {
     name: over.name ?? 'Drill',
     category: over.category ?? 'wall',
     metric: over.metric ?? 'reps',
-    target: over.target ?? null,
+    target: over.target ?? 20,
     notes: over.notes ?? null,
     createdAt: NOW,
     updatedAt: NOW,
@@ -182,7 +182,7 @@ afterEach(() => {
 // Common test fixtures — routine with N planned sets of a single drill.
 function seedRoutine({
   plannedSets = 3 as number | null,
-  drillTarget = null as number | null,
+  drillTarget = 20 as number,
   drillMetric = 'reps' as Drill['metric'],
   entries = [] as DrillEntry[],
   itemId = 'ri-1',
@@ -329,21 +329,6 @@ describe('InSessionScreen — duration timer, wake-lock, and app-state resume', 
 
     const targetChip = await findByTestId('duration-target-chip-value');
     expect(JSON.stringify(targetChip.props)).toMatch(/10:00/);
-  });
-
-  it('duration timer with no target does not render the progress track or stat chips', async () => {
-    seedRoutine({
-      plannedSets: 1,
-      drillMetric: 'duration',
-      drillId: 'dur-nt',
-      drillTarget: null,
-    });
-
-    const { findByLabelText, queryByTestId } = await renderScreen();
-    await findByLabelText('Start');
-
-    expect(queryByTestId('duration-progress-track')).toBeNull();
-    expect(queryByTestId('duration-target-chip-value')).toBeNull();
   });
 
   it('activates keep-awake only while the timer is running', async () => {
@@ -694,17 +679,6 @@ describe('InSessionScreen — state-driven accent on primary action (issue #25)'
     expect(JSON.stringify(rateChip.props)).toMatch(/40%/);
   });
 
-  it('reps mode omits the progress track and stat chips when the drill has no target', async () => {
-    seedRoutine({ plannedSets: 1, drillMetric: 'reps', drillId: 'd-1', drillTarget: null });
-
-    const { findByTestId, queryByTestId, queryByText } = await renderScreen();
-    await findByTestId('reps-hero-readout');
-
-    expect(queryByTestId('reps-progress-track')).toBeNull();
-    expect(queryByText('TARGET')).toBeNull();
-    expect(queryByText('REMAINING')).toBeNull();
-  });
-
   it('reps Save button fill follows the state-driven accent as the draft value crosses target thresholds', async () => {
     seedRoutine({ plannedSets: 1, drillMetric: 'reps', drillId: 'd-1', drillTarget: 100 });
 
@@ -767,22 +741,6 @@ describe('InSessionScreen — state-driven accent on primary action (issue #25)'
 
     const save = await findByTestId('primary-action');
     expect(resolveButtonBackground(save)).toBe(colors.accentMagenta);
-  });
-
-  it('accuracy mode omits the progress track and stat chips when the drill has no target', async () => {
-    seedRoutine({
-      plannedSets: 1,
-      drillMetric: 'accuracy',
-      drillId: 'd-1',
-      drillTarget: null,
-    });
-
-    const { findByLabelText, queryByTestId, queryByText } = await renderScreen();
-    await findByLabelText('accuracy-value-input');
-
-    expect(queryByTestId('accuracy-progress-track')).toBeNull();
-    expect(queryByText('TARGET')).toBeNull();
-    expect(queryByText('REMAINING')).toBeNull();
   });
 
   it('duration Stop button switches to the magenta accent once elapsed ≥ 100% of target', async () => {

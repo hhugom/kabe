@@ -15,7 +15,7 @@ async function insertDrill(db: TestDb, id?: string) {
     name: 'A drill',
     category: 'wall',
     metric: 'reps',
-    target: null,
+    target: 20,
     notes: null,
     createdAt: now,
     updatedAt: now,
@@ -72,12 +72,12 @@ describe('listRecentSessions', () => {
     expect(recent.map((r) => r.routineName)).toEqual([null, 'Wall warmup']);
   });
 
-  it('counts distinct drills logged, not entries', async () => {
+  it('carries each session\'s aggregated drills, summed across entries', async () => {
     const db = createTestDb();
     const drillA = await insertDrill(db);
     const drillB = await insertDrill(db);
     const s = await startSession(db, { now: at('2026-06-28T10:00:00.000Z') });
-    // Two entries for drill A, one for drill B → 2 distinct drills.
+    // Two entries for drill A (10 + 12), one for drill B → aggregated per drill.
     await logEntry(db, { sessionId: s.id, drillId: drillA, value: 10, now: at('2026-06-28T10:01:00.000Z') });
     await logEntry(db, { sessionId: s.id, drillId: drillA, value: 12, now: at('2026-06-28T10:02:00.000Z') });
     await logEntry(db, { sessionId: s.id, drillId: drillB, value: 8, now: at('2026-06-28T10:03:00.000Z') });
@@ -85,16 +85,19 @@ describe('listRecentSessions', () => {
 
     const [recent] = await listRecentSessions(db);
 
-    expect(recent.drillCount).toBe(2);
+    expect(recent.drills.map((d) => ({ drillId: d.drillId, value: d.value }))).toEqual([
+      { drillId: drillA, value: 22 },
+      { drillId: drillB, value: 8 },
+    ]);
   });
 
-  it('reports a drill count of 0 for a session with no entries', async () => {
+  it('returns an empty drills array for a session with no entries', async () => {
     const db = createTestDb();
     await completedSession(db, { startedAt: '2026-06-28T10:00:00.000Z' });
 
     const [recent] = await listRecentSessions(db);
 
-    expect(recent.drillCount).toBe(0);
+    expect(recent.drills).toEqual([]);
   });
 
   it('returns at most the 3 most-recent sessions by default', async () => {

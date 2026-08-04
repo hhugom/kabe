@@ -1,22 +1,22 @@
 import { Pressable, StyleSheet, Text, View } from 'react-native';
 import { Icon } from './Icon';
-import { Row } from './Row';
-import { relativeDay } from '../relative-day';
-import type { RecentSession } from '../use-cases/recent-sessions';
-import { colors, radius, spacing, typography } from '../theme';
+import { SessionCard } from './SessionCard';
+import type { HistorySession } from '../use-cases/session-history';
+import { colors, spacing, typography } from '../theme';
 
 type Props = {
-  sessions: RecentSession[];
+  sessions: HistorySession[];
   /** Reference point for relative-day labels; injectable for tests. */
   now?: Date;
   onViewHistory?: () => void;
   onOpenSession?: (id: string) => void;
 };
 
-// Home's "Recent practice" teaser below the Start hero (issue #45, variant A):
-// a lean list of the most-recent completed sessions. The active session is not shown
-// here — the Start hero above already morphs to Resume.
-export function RecentPractice({ sessions, now = new Date(), onViewHistory, onOpenSession }: Props) {
+// Home's "Recent practice" teaser below the Start hero (issue #45): the most-recent
+// completed sessions as the same SessionCard the History screen uses, each capped to
+// its first three drills. The active session is not shown here — the Start hero above
+// already morphs to Resume.
+export function RecentPractice({ sessions, onViewHistory, onOpenSession }: Props) {
   if (sessions.length === 0) {
     return (
       <View style={styles.section}>
@@ -37,27 +37,8 @@ export function RecentPractice({ sessions, now = new Date(), onViewHistory, onOp
       </View>
 
       {sessions.map((s) => (
-        <Row
-          key={s.id}
-          testID="recent-session-row"
-          title={relativeDay(new Date(s.startedAt), now)}
-          meta={s.routineName ?? 'Free session'}
-          trailing={<Badge>{drillLabel(s.drillCount)}</Badge>}
-          onPress={() => onOpenSession?.(s.id)}
-        />
+        <SessionCard key={s.id} session={s} maxDrills={3} onPress={onOpenSession} />
       ))}
-    </View>
-  );
-}
-
-function drillLabel(count: number): string {
-  return `${count} drill${count === 1 ? '' : 's'}`;
-}
-
-function Badge({ children }: { children: string }) {
-  return (
-    <View style={styles.badge}>
-      <Text style={styles.badgeText}>{children}</Text>
     </View>
   );
 }
@@ -78,11 +59,4 @@ const styles = StyleSheet.create({
     fontWeight: '700',
     textTransform: 'none',
   },
-  badge: {
-    backgroundColor: colors.surfaceHi,
-    paddingHorizontal: spacing.sm,
-    paddingVertical: 2,
-    borderRadius: radius.pill,
-  },
-  badgeText: { ...typography.caption, color: colors.accent, fontWeight: '700' },
 });

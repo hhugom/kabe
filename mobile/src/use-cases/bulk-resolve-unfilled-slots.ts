@@ -26,9 +26,7 @@ export function unfilledSlots(state: ActiveSessionState): UnfilledSlot[] {
 }
 
 // Complete-to-target branch of the End-Session modal.
-// For each unfilled slot whose drill has a target, log one DrillEntry at that
-// target value. Drills with no target can't be auto-logged, so their slots are
-// left alone — the player can revisit them or Skip-all next round.
+// For each unfilled slot, log one DrillEntry at the drill's (mandatory) target value.
 export async function completeToTarget(
   state: ActiveSessionState,
   db: Db,
@@ -36,7 +34,7 @@ export async function completeToTarget(
 ): Promise<ActiveSessionState> {
   for (const slot of unfilledSlots(state)) {
     const drill = drillFor(state, slot.drillId);
-    if (!drill || drill.target == null) continue;
+    if (!drill) continue;
     for (let i = 0; i < slot.count; i++) {
       await logEntry(db, {
         sessionId: state.session.id,

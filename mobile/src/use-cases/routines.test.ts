@@ -23,7 +23,7 @@ async function insertDrill(db: TestDb, id = uuidv4()) {
     name: 'A drill',
     category: 'wall',
     metric: 'reps',
-    target: null,
+    target: 20,
     notes: null,
     createdAt: FIXED_NOW,
     updatedAt: FIXED_NOW,

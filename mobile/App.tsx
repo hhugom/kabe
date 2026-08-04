@@ -32,6 +32,7 @@ import { HomeScreen } from './src/screens/HomeScreen';
 import { RoutineEditorScreen } from './src/screens/RoutineEditorScreen';
 import { RoutinesScreen } from './src/screens/RoutinesScreen';
 import { StatsScreen } from './src/screens/StatsScreen';
+import { HistoryScreen } from './src/screens/HistoryScreen';
 import { seedIfEmpty } from './src/use-cases/drills';
 import { seedRoutinesIfEmpty } from './src/use-cases/routines';
 import { getActiveSession } from './src/use-cases/sessions';
@@ -201,6 +202,11 @@ export default function App() {
               name="RowsDemo"
               component={RowsDemoScreen}
               options={{ title: 'Row primitive' }}
+            />
+            <RootStack.Screen
+              name="History"
+              component={HistoryScreen}
+              options={{ title: 'Practice history', header: renderPillHeader }}
             />
           </RootStack.Navigator>
         </SessionSheetProvider>

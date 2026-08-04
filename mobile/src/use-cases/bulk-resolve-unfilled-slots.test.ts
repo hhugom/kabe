@@ -15,7 +15,7 @@ async function insertDrill(
     id?: string;
     name?: string;
     metric?: 'reps' | 'duration' | 'accuracy';
-    target?: number | null;
+    target?: number;
   } = {}
 ) {
   const id = over.id ?? uuidv4();
@@ -24,7 +24,7 @@ async function insertDrill(
     name: over.name ?? 'A drill',
     category: 'wall',
     metric: over.metric ?? 'reps',
-    target: over.target ?? null,
+    target: over.target ?? 20,
     notes: null,
     createdAt: FIXED_NOW,
     updatedAt: FIXED_NOW,
@@ -206,21 +206,6 @@ describe('completeToTarget', () => {
     expect(next.entries.map((e) => e.value).sort((a, b) => a - b)).toEqual([7, 10, 10]);
   });
 
-  it('skips unfilled slots for drills that have no target (nothing to auto-log)', async () => {
-    const db = createTestDb();
-    const dA = await insertDrill(db, { name: 'A', metric: 'reps', target: null });
-    const routine = await createRoutine(db, {
-      name: 'R',
-      items: [{ drillId: dA, plannedSets: 2 }],
-      now: clock,
-    });
-    await startSession(db, { routineId: routine.id, now: clock });
-    const state = (await hydrate(db))!;
-
-    const next = await completeToTarget(state, db, { now: clock });
-
-    expect(next.entries).toEqual([]);
-  });
 });
 
 describe('skipAllUnfilled', () => {
