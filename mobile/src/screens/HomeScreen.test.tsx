@@ -1,6 +1,22 @@
 import { fireEvent, render } from '@testing-library/react-native';
+import { TamaguiProvider } from 'tamagui';
+import tamaguiConfig from '../../tamagui.config';
 import { HomeScreen } from './HomeScreen';
 import { SessionActionsProvider } from '../components/session-actions';
+import type { RecentSession } from '../use-cases/recent-sessions';
+import { listRecentSessions } from '../use-cases/recent-sessions';
+
+jest.mock('../db/client', () => ({ getAppDb: jest.fn(() => null) }));
+jest.mock('../use-cases/recent-sessions', () => ({ listRecentSessions: jest.fn() }));
+
+const mockListRecentSessions = listRecentSessions as jest.MockedFunction<
+  typeof listRecentSessions
+>;
+
+beforeEach(() => {
+  mockListRecentSessions.mockReset();
+  mockListRecentSessions.mockResolvedValue([]);
+});
 
 async function renderHome(
   overrides: Partial<{
@@ -16,9 +32,13 @@ async function renderHome(
     ...overrides,
   };
   const rendered = await render(
-    <SessionActionsProvider value={value}>
-      <HomeScreen />
-    </SessionActionsProvider>
+    // TamaguiProvider mirrors App.tsx — Home hosts the Tamagui-based Row primitive
+    // via the RecentPractice section (issue #45).
+    <TamaguiProvider config={tamaguiConfig} defaultTheme="kabe_dark">
+      <SessionActionsProvider value={value}>
+        <HomeScreen />
+      </SessionActionsProvider>
+    </TamaguiProvider>
   );
   return { value, ...rendered };
 }
@@ -61,11 +81,31 @@ describe('HomeScreen', () => {
     expect(onResumePress).toHaveBeenCalledTimes(1);
   });
 
-  it('renders a Recent practice section with an empty-state message', async () => {
+  it('renders the Recent practice section header', async () => {
     // Home's secondary surface (dashboard content) — matches "See recent practice" from #8.
-    const { getByText } = await renderHome();
-    expect(getByText('Recent practice')).toBeTruthy();
-    expect(getByText('No recent practice yet')).toBeTruthy();
+    const { findByText } = await renderHome();
+    expect(await findByText('Recent practice')).toBeTruthy();
+  });
+
+  it('renders the "No recent practice yet" empty state when there are none', async () => {
+    mockListRecentSessions.mockResolvedValue([]);
+    const { findByText } = await renderHome();
+    expect(await findByText('No recent practice yet')).toBeTruthy();
+  });
+
+  it('lists recent sessions when there are some', async () => {
+    const session: RecentSession = {
+      id: 's1',
+      startedAt: '2026-06-30T09:00:00.000Z',
+      routineName: 'Wall warmup',
+      drillCount: 3,
+    };
+    mockListRecentSessions.mockResolvedValue([session]);
+    const { findAllByTestId, getByText } = await renderHome();
+
+    expect(await findAllByTestId('recent-session-row')).toHaveLength(1);
+    expect(getByText('Wall warmup')).toBeTruthy();
+    expect(getByText('3 drills')).toBeTruthy();
   });
 
 });
